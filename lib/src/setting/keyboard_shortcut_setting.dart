@@ -149,7 +149,7 @@ class KeyboardShortcutSetting with JHLifeCircleBeanWithConfigStorage implements 
 
         if (value is List) {
           // New format: list of up to 2 bindings
-          final list = value.map((e) => ReadActionBinding.fromJson(e)).take(2).toList();
+          final list = value.map(ReadActionBinding.fromJson).take(2).toList();
           while (list.length < 2) { list.add(null); }
           bindings[action] = list;
         } else {

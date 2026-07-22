@@ -79,10 +79,10 @@ class EHAddTagDialog extends StatelessWidget {
           textAlignVertical: TextAlignVertical.center,
           controller: TextEditingController.fromValue(
             TextEditingValue(
-              text: state.keyword ?? '',
+              text: state.keyword,
 
               /// make cursor stay at last letter
-              selection: TextSelection.fromPosition(TextPosition(offset: state.keyword.length ?? 0)),
+              selection: TextSelection.fromPosition(TextPosition(offset: state.keyword.length)),
             ),
           ),
           onChanged: (text) {

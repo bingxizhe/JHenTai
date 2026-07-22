@@ -14,7 +14,6 @@ import 'package:jhentai/src/pages/details/details_page.dart';
 import 'package:jhentai/src/pages/details/details_page_logic.dart';
 import 'package:jhentai/src/pages/details/details_page_state.dart';
 import 'package:html/dom.dart' as dom;
-import 'package:jhentai/src/widget/keep_alive.dart';
 
 import '../../../../../config/ui_config.dart';
 import '../../../../../widget/eh_thumbnail.dart';
@@ -284,17 +283,17 @@ class DetailsPreviewPageState extends DetailsPageState {
       archivePageUrl: 'archivePageUrl page url - preview',
       tags: LinkedHashMap.of({
         'language': [
-          GalleryTag(tagData: TagData(namespace: 'language', key: 'chinese')),
+          GalleryTag(tagData: const TagData(namespace: 'language', key: 'chinese')),
         ],
         'artist': [
-          GalleryTag(tagData: TagData(namespace: 'artist', key: 'JTMonster')),
-          GalleryTag(tagData: TagData(namespace: 'artist', key: '酱天小禽兽')),
+          GalleryTag(tagData: const TagData(namespace: 'artist', key: 'JTMonster')),
+          GalleryTag(tagData: const TagData(namespace: 'artist', key: '酱天小禽兽')),
         ],
         'character': [
-          GalleryTag(tagData: TagData(namespace: 'artist', key: 'Hibiki')),
+          GalleryTag(tagData: const TagData(namespace: 'artist', key: 'Hibiki')),
         ],
         'female': [
-          GalleryTag(tagData: TagData(namespace: 'artist', key: 'Hibiki')),
+          GalleryTag(tagData: const TagData(namespace: 'artist', key: 'Hibiki')),
         ],
       }),
       publishTime: '2022-02-22 12:12:12',

@@ -33,6 +33,8 @@ class ArchiveListDownloadPageLogic extends GetxController
   Future<void> onInit() async {
     super.onInit();
 
+    archiveDownloadService.ensureRestored();
+
     String? displayGroupsString = await localConfigService.read(configKey: ConfigEnum.displayArchiveGroups);
     if (displayGroupsString == null) {
       state.displayGroups = {'default'.tr};

@@ -703,12 +703,12 @@ class LocalBlockRule {
 
   Map<String, dynamic> toJson() {
     return {
-      "id": this.id,
-      "groupId": this.groupId,
-      "target": this.target.code,
-      "attribute": this.attribute.code,
-      "pattern": this.pattern.code,
-      "expression": this.expression,
+      "id": id,
+      "groupId": groupId,
+      "target": target.code,
+      "attribute": attribute.code,
+      "pattern": pattern.code,
+      "expression": expression,
     };
   }
 

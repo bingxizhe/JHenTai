@@ -319,7 +319,6 @@ class EHGalleryComicInfo extends ComicInfo {
   final String? uploader;
   final String publishTime;
   final String? languageAbbreviation;
-  @override
   final List<TagData> tagDatas;
   final double rating;
 

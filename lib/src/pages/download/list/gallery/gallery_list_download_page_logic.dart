@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:get/get.dart';
 import 'package:jhentai/src/enum/config_enum.dart';
 import 'package:jhentai/src/extension/get_logic_extension.dart';
@@ -18,7 +19,11 @@ import '../../mixin/basic/multi_select/multi_select_download_page_state_mixin.da
 import 'gallery_list_download_page_state.dart';
 
 class GalleryListDownloadPageLogic extends GetxController
-    with Scroll2TopLogicMixin, MultiSelectDownloadPageLogicMixin<GalleryDownloadedData>, GalleryDownloadPageLogicMixin, UpdateGlobalGalleryStatusLogicMixin {
+    with
+        Scroll2TopLogicMixin,
+        MultiSelectDownloadPageLogicMixin<GalleryDownloadedData>,
+        GalleryDownloadPageLogicMixin,
+        UpdateGlobalGalleryStatusLogicMixin {
   GalleryListDownloadPageState state = GalleryListDownloadPageState();
 
   @override
@@ -33,7 +38,12 @@ class GalleryListDownloadPageLogic extends GetxController
   Future<void> onInit() async {
     super.onInit();
 
-    String? displayGroupsString = await localConfigService.read(configKey: ConfigEnum.displayGalleryGroups);
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      downloadService.ensureRestored();
+    });
+
+    String? displayGroupsString = await localConfigService.read(
+        configKey: ConfigEnum.displayGalleryGroups);
     if (displayGroupsString == null) {
       state.displayGroups = {'default'.tr};
     } else {
@@ -41,7 +51,9 @@ class GalleryListDownloadPageLogic extends GetxController
     }
     state.displayGroupsCompleter.complete();
 
-    maxGalleryNum4AnimationListener = ever(performanceSetting.maxGalleryNum4Animation, (_) => updateSafely([bodyId]));
+    maxGalleryNum4AnimationListener = ever(
+        performanceSetting.maxGalleryNum4Animation,
+        (_) => updateSafely([bodyId]));
   }
 
   @override
@@ -60,7 +72,9 @@ class GalleryListDownloadPageLogic extends GetxController
       state.displayGroups.add(groupName);
     }
 
-    await localConfigService.write(configKey: ConfigEnum.displayGalleryGroups, value: jsonEncode(state.displayGroups.toList()));
+    await localConfigService.write(
+        configKey: ConfigEnum.displayGalleryGroups,
+        value: jsonEncode(state.displayGroups.toList()));
     state.groupedListController.toggleGroup(groupName);
   }
 
@@ -73,7 +87,8 @@ class GalleryListDownloadPageLogic extends GetxController
   }
 
   @override
-  void handleRemoveItem(GalleryDownloadedData gallery, bool deleteImages, BuildContext context) async {
+  void handleRemoveItem(GalleryDownloadedData gallery, bool deleteImages,
+      BuildContext context) async {
     bool isUpdatingDependent = downloadService.isUpdatingDependent(gallery.gid);
 
     if (isUpdatingDependent) {
@@ -105,7 +120,10 @@ class GalleryListDownloadPageLogic extends GetxController
       gallerys.addAll(downloadService.gallerysWithGroup(group));
     }
 
-    multiSelectDownloadPageState.selectedGids.addAll(gallerys.map((gallery) => gallery.gid));
-    updateSafely(multiSelectDownloadPageState.selectedGids.map((gid) => '$itemCardId::$gid').toList());
+    multiSelectDownloadPageState.selectedGids
+        .addAll(gallerys.map((gallery) => gallery.gid));
+    updateSafely(multiSelectDownloadPageState.selectedGids
+        .map((gid) => '$itemCardId::$gid')
+        .toList());
   }
 }

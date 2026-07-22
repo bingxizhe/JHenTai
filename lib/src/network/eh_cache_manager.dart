@@ -142,7 +142,7 @@ class EHCacheManager extends Interceptor {
       return true;
     }
 
-    if (!allowedStatusCodes.contains(response?.statusCode)) {
+    if (!allowedStatusCodes.contains(response.statusCode)) {
       return true;
     }
 

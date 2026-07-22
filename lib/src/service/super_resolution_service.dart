@@ -70,7 +70,7 @@ class SuperResolutionService extends GetxController with JHLifeCircleBeanErrorCa
           SuperResolutionStatus.values[data.status],
           data.imageStatuses
               .split(SuperResolutionInfo.imageStatusesSeparator)
-              .map((e) => int.parse(e))
+              .map(int.parse)
               .map((index) => SuperResolutionStatus.values[index])
               .toList(),
         ),

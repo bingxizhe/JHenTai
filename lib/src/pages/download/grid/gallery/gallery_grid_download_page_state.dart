@@ -1,4 +1,3 @@
-import 'package:get/get.dart';
 
 import '../../../../database/database.dart';
 import '../../../../mixin/scroll_to_top_state_mixin.dart';

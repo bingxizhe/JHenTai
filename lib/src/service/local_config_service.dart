@@ -19,10 +19,10 @@ class LocalConfig {
 
   Map<String, dynamic> toJson() {
     return {
-      "configKey": this.configKey.key,
-      "subConfigKey": this.subConfigKey,
-      "value": this.value,
-      "utime": this.utime,
+      "configKey": configKey.key,
+      "subConfigKey": subConfigKey,
+      "value": value,
+      "utime": utime,
     };
   }
 

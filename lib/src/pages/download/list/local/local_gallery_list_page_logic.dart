@@ -5,7 +5,8 @@ import '../../../../service/local_gallery_service.dart';
 import '../../mixin/local/local_gallery_download_page_logic_mixin.dart';
 import 'local_gallery_list_page_state.dart';
 
-class LocalGalleryListPageLogic extends GetxController with Scroll2TopLogicMixin, LocalGalleryDownloadPageLogicMixin {
+class LocalGalleryListPageLogic extends GetxController
+    with Scroll2TopLogicMixin, LocalGalleryDownloadPageLogicMixin {
   LocalGalleryListPageState state = LocalGalleryListPageState();
 
   @override
@@ -16,6 +17,12 @@ class LocalGalleryListPageLogic extends GetxController with Scroll2TopLogicMixin
 
   @override
   set currentPath(String value) => state.currentPath = value;
+
+  @override
+  void onInit() {
+    super.onInit();
+    localGalleryService.ensureScanned();
+  }
 
   @override
   Future<void> doRemoveItem(LocalGallery gallery) async {

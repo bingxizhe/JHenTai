@@ -110,7 +110,7 @@ class SecuritySetting with JHLifeCircleBeanWithConfigStorage implements JHLifeCi
   Future<void> savePassword(String rawPassword) async {
     String md5 = keyToMd5(rawPassword);
     log.debug('saveEncryptedPassword:$md5');
-    this.encryptedPassword.value = md5;
+    encryptedPassword.value = md5;
     await saveBeanConfig();
   }
 

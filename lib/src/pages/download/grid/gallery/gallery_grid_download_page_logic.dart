@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:get/get.dart';
 import 'package:jhentai/src/extension/get_logic_extension.dart';
 import 'package:jhentai/src/mixin/scroll_to_top_logic_mixin.dart';
@@ -44,6 +45,14 @@ class GalleryGridDownloadPageLogic extends GetxController
   @override
   GridBasePageServiceMixin get galleryService => downloadService;
 
+  @override
+  void onInit() {
+    super.onInit();
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      downloadService.ensureRestored();
+    });
+  }
+
   void handleTapTitle(GalleryDownloadedData gallery) {
     if (multiSelectDownloadPageState.inMultiSelectMode) {
       toggleSelectItem(gallery.gid);
@@ -53,7 +62,8 @@ class GalleryGridDownloadPageLogic extends GetxController
   }
 
   @override
-  void handleRemoveItem(GalleryDownloadedData gallery, bool deleteImages, BuildContext context) async {
+  void handleRemoveItem(GalleryDownloadedData gallery, bool deleteImages,
+      BuildContext context) async {
     bool isUpdatingDependent = downloadService.isUpdatingDependent(gallery.gid);
 
     if (isUpdatingDependent) {
@@ -69,13 +79,16 @@ class GalleryGridDownloadPageLogic extends GetxController
       }
     }
 
-    downloadService.deleteGallery(gallery, deleteImages: deleteImages).then((_) => super.handleRemoveItem(gallery, deleteImages, context));
+    downloadService
+        .deleteGallery(gallery, deleteImages: deleteImages)
+        .then((_) => super.handleRemoveItem(gallery, deleteImages, context));
   }
 
   void goToDetailPage(GalleryDownloadedData gallery) {
     toRoute(
       Routes.details,
-      arguments: DetailsPageArgument(galleryUrl: GalleryUrl.parse(gallery.galleryUrl)),
+      arguments:
+          DetailsPageArgument(galleryUrl: GalleryUrl.parse(gallery.galleryUrl)),
     );
   }
 
@@ -92,18 +105,23 @@ class GalleryGridDownloadPageLogic extends GetxController
   @override
   void selectAllItem() {
     multiSelectDownloadPageState.selectedGids.clear();
-    multiSelectDownloadPageState.selectedGids.addAll(state.currentGalleryObjects.map((archive) => archive.gid));
-    updateSafely(multiSelectDownloadPageState.selectedGids.map((gid) => '$itemCardId::$gid').toList());
+    multiSelectDownloadPageState.selectedGids
+        .addAll(state.currentGalleryObjects.map((archive) => archive.gid));
+    updateSafely(multiSelectDownloadPageState.selectedGids
+        .map((gid) => '$itemCardId::$gid')
+        .toList());
   }
 
   @override
-  Future<void> saveGalleryOrderAfterDrag(int beforeIndex, int afterIndex) async {
+  Future<void> saveGalleryOrderAfterDrag(
+      int beforeIndex, int afterIndex) async {
     List<GalleryDownloadedData> gallerys = state.currentGalleryObjects.cast();
 
     /// default order is 0, we must assign current order to the archive first
     for (int i = 0; i < gallerys.length; i++) {
       GalleryDownloadedData gallery = gallerys[i];
-      GalleryDownloadInfo galleryDownloadInfo = downloadService.galleryDownloadInfos[gallery.gid]!;
+      GalleryDownloadInfo galleryDownloadInfo =
+          downloadService.galleryDownloadInfos[gallery.gid]!;
       galleryDownloadInfo.sortOrder = i;
     }
 
@@ -111,7 +129,8 @@ class GalleryGridDownloadPageLogic extends GetxController
     int tail = max(beforeIndex, afterIndex);
 
     for (int index = head; index <= tail; index++) {
-      GalleryDownloadInfo galleryDownloadInfo = downloadService.galleryDownloadInfos[gallerys[index].gid]!;
+      GalleryDownloadInfo galleryDownloadInfo =
+          downloadService.galleryDownloadInfos[gallerys[index].gid]!;
 
       if (index == beforeIndex) {
         galleryDownloadInfo.sortOrder = afterIndex;

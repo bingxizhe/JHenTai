@@ -76,7 +76,7 @@ class _EHGroupNameSelectorState extends State<EHGroupNameSelector> {
       padding: const EdgeInsets.only(left: 4),
       child: Text(
         'existingGroup'.tr,
-        style: TextStyle(fontSize: UIConfig.groupSelectorChipsHintTextSize),
+        style: const TextStyle(fontSize: UIConfig.groupSelectorChipsHintTextSize),
       ),
     );
   }

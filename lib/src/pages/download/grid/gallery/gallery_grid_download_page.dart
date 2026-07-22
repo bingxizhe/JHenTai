@@ -98,6 +98,13 @@ class GalleryGridDownloadPage extends StatelessWidget with Scroll2TopPageMixin, 
                 children: [const Icon(Icons.search), const SizedBox(width: 12), Text('search'.tr)],
               ),
             ),
+            PopupMenuItem(
+              value: 5,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [const Icon(Icons.history), const SizedBox(width: 12), Text('deleteHistoryVersions'.tr)],
+              ),
+            ),
           ];
         },
         onSelected: (value) {
@@ -118,6 +125,9 @@ class GalleryGridDownloadPage extends StatelessWidget with Scroll2TopPageMixin, 
           }
           if (value == 4) {
             toRoute(Routes.downloadSearch);
+          }
+          if (value == 5) {
+            logic.handleDeleteHistoryVersions();
           }
         },
       ),

@@ -39,13 +39,13 @@ class CloudConfig {
 
   Map<String, dynamic> toJson() {
     return {
-      "id": this.id,
-      "shareCode": this.shareCode,
-      "identificationCode": this.identificationCode,
-      "type": this.type.code,
-      "version": this.version,
-      "config": this.config,
-      "ctime": this.ctime.toUtc().millisecondsSinceEpoch,
+      "id": id,
+      "shareCode": shareCode,
+      "identificationCode": identificationCode,
+      "type": type.code,
+      "version": version,
+      "config": config,
+      "ctime": ctime.toUtc().millisecondsSinceEpoch,
     };
   }
 }

@@ -54,6 +54,10 @@ enum ConfigEnum {
   /// cache
   isSpreadPage('isSpreadPage'),
   galleryImageHash('galleryImageHash'),
+
+  /// favorites batch download (retry + breakpoint resume)
+  favoriteBatchDownloadProgress('favoriteBatchDownloadProgress'),
+  favoriteBatchDownloadFavorites('favoriteBatchDownloadFavorites'),
   ;
 
   final String key;

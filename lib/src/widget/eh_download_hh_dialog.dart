@@ -45,7 +45,7 @@ class _EHDownloadHHDialogState extends State<EHDownloadHHDialog> {
         child: LoadingStateIndicator(
           loadingState: loadingState,
           errorTapCallback: _getHHInfo,
-          successWidgetBuilder: () => _buildBody(),
+          successWidgetBuilder: _buildBody,
         ),
       ),
     );

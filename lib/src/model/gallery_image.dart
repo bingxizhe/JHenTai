@@ -77,7 +77,7 @@ class GalleryImage {
       originalImageUrl: originalImageUrl ?? this.originalImageUrl,
       originalImageHeight: originalImageHeight ?? this.originalImageHeight,
       originalImageWidth: originalImageWidth ?? this.originalImageWidth,
-      reloadKey: reloadKey ?? this.reloadKey,
+      reloadKey: reloadKey ?? reloadKey,
       imageHash: imageHash ?? this.imageHash,
       path: path ?? this.path,
       downloadStatus: downloadStatus ?? this.downloadStatus,

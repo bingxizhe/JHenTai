@@ -55,7 +55,7 @@ class MobileLayoutPageV2State with DoubleTapToRefreshStateMixin {
         routeName: Routes.mobileV2Search,
         selectedIcon: const Icon(Icons.search, shadows: [Shadow(blurRadius: 2)]),
         unselectedIcon: const Icon(Icons.search),
-        page: () => SearchPageMobileV2(),
+        page: SearchPageMobileV2.new,
         shouldRender: false,
         enterNewRoute: true,
       ),

@@ -50,7 +50,7 @@ class FavoriteSetting with JHLifeCircleBeanWithConfigStorage implements JHLifeCi
   @override
   String toConfigString() {
     return jsonEncode({
-      'favoriteTagNames': jsonEncode(favoriteTagNames.value),
+      'favoriteTagNames': jsonEncode(favoriteTagNames.toList()),
       'favoriteCounts': jsonEncode(favoriteCounts),
     });
   }

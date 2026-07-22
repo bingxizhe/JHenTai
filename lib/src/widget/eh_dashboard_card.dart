@@ -7,9 +7,7 @@ import '../config/ui_config.dart';
 
 import '../consts/locale_consts.dart';
 import '../model/gallery_image.dart';
-import '../model/gallery_tag.dart';
 import '../routes/routes.dart';
-import '../service/tag_translation_service.dart';
 import '../utils/route_util.dart';
 
 class EHDashboardCard extends StatefulWidget {

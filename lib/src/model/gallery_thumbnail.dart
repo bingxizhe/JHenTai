@@ -60,11 +60,7 @@ class GalleryThumbnail {
 
   @override
   String toString() {
-    return 'GalleryThumbnail{' +
-        ' href: $href,' +
-        ' isLarge: $isLarge,' +
-        ' thumbUrl: $thumbUrl,' +
-        ' thumbHeight: $thumbHeight,' +
+    return 'GalleryThumbnail{' ' href: $href,' ' isLarge: $isLarge,' ' thumbUrl: $thumbUrl,' ' thumbHeight: $thumbHeight,' +
         ' thumbWidth: $thumbWidth,' +
         ' offSet: $offSet,' +
         ' originImageHash: $originImageHash,' +
@@ -93,13 +89,13 @@ class GalleryThumbnail {
 
   Map<String, dynamic> toMap() {
     return {
-      'href': this.href,
-      'isLarge': this.isLarge,
-      'thumbUrl': this.thumbUrl,
-      'thumbHeight': this.thumbHeight,
-      'thumbWidth': this.thumbWidth,
-      'offSet': this.offSet,
-      'originImageHash': this.originImageHash,
+      'href': href,
+      'isLarge': isLarge,
+      'thumbUrl': thumbUrl,
+      'thumbHeight': thumbHeight,
+      'thumbWidth': thumbWidth,
+      'offSet': offSet,
+      'originImageHash': originImageHash,
     };
   }
 

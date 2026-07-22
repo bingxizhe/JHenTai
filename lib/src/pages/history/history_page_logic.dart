@@ -61,7 +61,7 @@ class HistoryPageLogic extends OldBasePageLogic {
         ],
         cancelButton: CupertinoActionSheetAction(
           child: Text('cancel'.tr),
-          onPressed: () => backRoute(),
+          onPressed: backRoute,
         ),
       ),
     );

@@ -152,7 +152,7 @@ class Routes {
     ),
     EHPage(
       name: read,
-      page: () => ReadPage(),
+      page: ReadPage.new,
       transition: defaultTransition,
       side: Side.fullScreen,
     ),
@@ -170,13 +170,13 @@ class Routes {
     ),
     EHPage(
       name: desktopHome,
-      page: () => DesktopHomePage(),
+      page: DesktopHomePage.new,
       transition: defaultTransition,
       side: Side.left,
     ),
     EHPage(
       name: mobileLayoutV2,
-      page: () => MobileLayoutPageV2(),
+      page: MobileLayoutPageV2.new,
       transition: defaultTransition,
       side: Side.left,
     ),
@@ -187,7 +187,7 @@ class Routes {
     ),
     EHPage(
       name: imagePage,
-      page: () => GalleryImagePage(),
+      page: GalleryImagePage.new,
       transition: defaultTransition,
     ),
     EHPage(
@@ -222,7 +222,7 @@ class Routes {
     ),
     EHPage(
       name: history,
-      page: () => HistoryPage(),
+      page: HistoryPage.new,
       transition: defaultTransition,
       side: Side.left,
     ),
@@ -240,13 +240,13 @@ class Routes {
     ),
     EHPage(
       name: mobileV2Search,
-      page: () => SearchPageMobileV2(),
+      page: SearchPageMobileV2.new,
       transition: defaultTransition,
       side: Side.left,
     ),
     EHPage(
       name: downloadSearch,
-      page: () => DownloadSearchPage(),
+      page: DownloadSearchPage.new,
       transition: defaultTransition,
       side: Side.left,
     ),
@@ -264,7 +264,7 @@ class Routes {
     ),
     EHPage(
       name: quickSearch,
-      page: () => QuickSearchPage(automaticallyImplyLeading: true).withEscOrFifthButton2BackRightRoute(),
+      page: () => const QuickSearchPage(automaticallyImplyLeading: true).withEscOrFifthButton2BackRightRoute(),
       transition: defaultTransition,
       offAllBefore: false,
     ),
@@ -296,7 +296,7 @@ class Routes {
     ),
     EHPage(
       name: settingPreference,
-      page: () => SettingPreferencePage().withEscOrFifthButton2BackRightRoute(),
+      page: () => const SettingPreferencePage().withEscOrFifthButton2BackRightRoute(),
       transition: defaultTransition,
     ),
     EHPage(

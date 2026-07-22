@@ -66,7 +66,6 @@ class EHSpiderParser {
 
   /// [gallerys, pageCount, prevPageIndex, nextPageIndex]
   static GalleryPageInfo galleryPage2GalleryPageInfo(Headers headers, dynamic data) {
-    String html = data as String;
     Document document = parse(data);
 
     if (document.querySelector('.itg.gltm') != null) {
@@ -219,7 +218,7 @@ class EHSpiderParser {
 
         /// remove ad and table header
         .where((element) => element.children.length != 1 && element.querySelector('th') == null)
-        .map((e) => _parseCompactGallery(e))
+        .map(_parseCompactGallery)
         .toList();
 
     int pageCount = _ranklistPageDocument2TotalPageCount(document);
@@ -516,9 +515,6 @@ class EHSpiderParser {
     Document document = parse(data as String);
 
     String note = document.querySelector('#galpop > div > div:nth-child(3) > textarea')!.text;
-
-    /// 1 / 1000 favorite note slots used. [?]
-    String usedSlotDesc = document.querySelector('#galpop > div > div:nth-child(3) > div:nth-child(6)')!.text;
 
     return GalleryNote(note: note);
   }

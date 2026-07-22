@@ -42,6 +42,12 @@ class ArchiveGridDownloadPageLogic extends GetxController
   @override
   GridBasePageServiceMixin get galleryService => archiveDownloadService;
 
+  @override
+  void onInit() {
+    super.onInit();
+    archiveDownloadService.ensureRestored();
+  }
+
   void handleTapTitle(ArchiveDownloadedData archive) {
     if (multiSelectDownloadPageState.inMultiSelectMode) {
       toggleSelectItem(archive.gid);
@@ -52,14 +58,17 @@ class ArchiveGridDownloadPageLogic extends GetxController
 
   @override
   Future<void> handleRemoveItem(ArchiveDownloadedData archive) async {
-    await archiveDownloadService.deleteArchive(archive.gid).then((_) => super.handleRemoveItem(archive));
+    await archiveDownloadService
+        .deleteArchive(archive.gid)
+        .then((_) => super.handleRemoveItem(archive));
     updateGlobalGalleryStatus();
   }
 
   void goToDetailPage(ArchiveDownloadedData archive) {
     toRoute(
       Routes.details,
-      arguments: DetailsPageArgument(galleryUrl: GalleryUrl.parse(archive.galleryUrl)),
+      arguments:
+          DetailsPageArgument(galleryUrl: GalleryUrl.parse(archive.galleryUrl)),
     );
   }
 
@@ -76,18 +85,23 @@ class ArchiveGridDownloadPageLogic extends GetxController
   @override
   void selectAllItem() {
     multiSelectDownloadPageState.selectedGids.clear();
-    multiSelectDownloadPageState.selectedGids.addAll(state.currentGalleryObjects.map((archive) => archive.gid));
-    updateSafely(multiSelectDownloadPageState.selectedGids.map((gid) => '$itemCardId::$gid').toList());
+    multiSelectDownloadPageState.selectedGids
+        .addAll(state.currentGalleryObjects.map((archive) => archive.gid));
+    updateSafely(multiSelectDownloadPageState.selectedGids
+        .map((gid) => '$itemCardId::$gid')
+        .toList());
   }
 
   @override
-  Future<void> saveGalleryOrderAfterDrag(int beforeIndex, int afterIndex) async {
+  Future<void> saveGalleryOrderAfterDrag(
+      int beforeIndex, int afterIndex) async {
     List<ArchiveDownloadedData> archives = state.currentGalleryObjects.cast();
 
     /// default order is 0, we must assign current order to the archive first
     for (int i = 0; i < archives.length; i++) {
       ArchiveDownloadedData archive = archives[i];
-      ArchiveDownloadInfo archiveDownloadInfo = archiveDownloadService.archiveDownloadInfos[archive.gid]!;
+      ArchiveDownloadInfo archiveDownloadInfo =
+          archiveDownloadService.archiveDownloadInfos[archive.gid]!;
       archiveDownloadInfo.sortOrder = i;
     }
 
@@ -95,7 +109,8 @@ class ArchiveGridDownloadPageLogic extends GetxController
     int tail = max(beforeIndex, afterIndex);
 
     for (int index = head; index <= tail; index++) {
-      ArchiveDownloadInfo archiveDownloadInfo = archiveDownloadService.archiveDownloadInfos[archives[index].gid]!;
+      ArchiveDownloadInfo archiveDownloadInfo =
+          archiveDownloadService.archiveDownloadInfos[archives[index].gid]!;
 
       if (index == beforeIndex) {
         archiveDownloadInfo.sortOrder = afterIndex;
@@ -115,7 +130,8 @@ class ArchiveGridDownloadPageLogic extends GetxController
   }
 
   @override
-  Future<void> changeParseSource(int gid, ArchiveParseSource parseSource) async {
+  Future<void> changeParseSource(
+      int gid, ArchiveParseSource parseSource) async {
     await super.changeParseSource(gid, parseSource);
     updateSafely(['${super.galleryId}::$gid']);
   }

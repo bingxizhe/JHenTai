@@ -84,13 +84,13 @@ class UserSetting with JHLifeCircleBeanWithConfigStorage implements JHLifeCircle
 
   Future<void> saveDefaultFavoriteIndex(int? index) async {
     log.debug('saveDefaultFavoriteIndex: $index');
-    this.defaultFavoriteIndex.value = index;
+    defaultFavoriteIndex.value = index;
     await saveBeanConfig();
   }
 
   Future<void> saveDefaultTagSetNo(int? number) async {
     log.debug('saveDefaultTagSet: $number');
-    this.defaultTagSetNo.value = number;
+    defaultTagSetNo.value = number;
     await saveBeanConfig();
   }
 

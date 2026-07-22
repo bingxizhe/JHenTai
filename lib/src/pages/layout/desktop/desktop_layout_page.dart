@@ -129,7 +129,7 @@ class DesktopLayoutPage extends StatelessWidget {
       onGenerateInitialRoutes: (_, __) => [
         GetPageRoute(
           settings: const RouteSettings(name: Routes.desktopHome),
-          page: () => DesktopHomePage(),
+          page: DesktopHomePage.new,
           popGesture: false,
           transition: Transition.fadeIn,
           showCupertinoParallax: false,

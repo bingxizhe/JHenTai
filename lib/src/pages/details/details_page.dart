@@ -26,7 +26,6 @@ import 'package:jhentai/src/widget/eh_tag.dart';
 import 'package:jhentai/src/widget/eh_thumbnail.dart';
 import 'package:jhentai/src/widget/eh_wheel_speed_controller.dart';
 import 'package:jhentai/src/widget/icon_text_button.dart';
-import 'package:jhentai/src/widget/keep_alive.dart';
 import 'package:jhentai/src/widget/loading_state_indicator.dart';
 
 import '../../database/database.dart';

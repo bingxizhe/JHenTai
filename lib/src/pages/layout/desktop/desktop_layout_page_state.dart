@@ -96,7 +96,7 @@ class DesktopLayoutPageState with DoubleTapToRefreshStateMixin {
         routeName: Routes.history,
         selectedIcon: const Icon(Icons.history, shadows: [Shadow(blurRadius: 2)]),
         unselectedIcon: const Icon(Icons.history_outlined),
-        page: () => HistoryPage(),
+        page: HistoryPage.new,
         scrollController: () => Get.find<HistoryPageLogic>().state.scrollController,
         shouldRender: false,
       ),

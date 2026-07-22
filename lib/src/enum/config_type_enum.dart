@@ -1,6 +1,6 @@
 enum CloudConfigTypeEnum {
   readIndexRecord(1, 'readIndexRecord'),
-  quickSearch(2, 'quickSearch'),
+  quickSearch(2, 'quickSearchConfig'),
   blockRules(3, 'blockRules'),
   searchHistory(4, 'searchHistory'),
   history(5, 'galleryHistory'),

@@ -103,7 +103,6 @@ class DownloadSearchPage extends StatelessWidget {
       child: GetBuilder<GalleryDownloadService>(
         id: '${galleryDownloadService.galleryDownloadProgressId}::${gallery.gid}',
         builder: (_) {
-          GalleryImage? cover = galleryDownloadService.galleryDownloadInfos[gallery.gid]?.images[0];
           GalleryDownloadProgress? downloadProgress = galleryDownloadService.galleryDownloadInfos[gallery.gid]?.downloadProgress;
           String? groupName = galleryDownloadService.galleryDownloadInfos[gallery.gid]?.group;
 

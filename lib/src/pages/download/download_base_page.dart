@@ -7,7 +7,9 @@ import 'package:jhentai/src/enum/config_enum.dart';
 import 'package:jhentai/src/extension/widget_extension.dart';
 import 'package:jhentai/src/pages/download/grid/local/local_gallery_grid_page.dart';
 import 'package:jhentai/src/service/local_config_service.dart';
-import 'package:jhentai/src/service/storage_service.dart';
+import 'package:jhentai/src/service/gallery_download_service.dart';
+import 'package:jhentai/src/service/local_gallery_service.dart';
+import 'package:jhentai/src/widget/loading_state_indicator.dart';
 import 'package:simple_animations/animation_controller_extension/animation_controller_extension.dart';
 import 'package:simple_animations/animation_mixin/animation_mixin.dart';
 import '../../config/ui_config.dart';
@@ -26,19 +28,25 @@ class DownloadPage extends StatefulWidget {
 
 class _DownloadPageState extends State<DownloadPage> {
   DownloadPageGalleryType galleryType = DownloadPageGalleryType.download;
-  DownloadPageBodyType bodyType = GetPlatform.isMobile ? DownloadPageBodyType.list : DownloadPageBodyType.grid;
+  DownloadPageBodyType bodyType = GetPlatform.isMobile
+      ? DownloadPageBodyType.list
+      : DownloadPageBodyType.grid;
   Completer<void> bodyTypeCompleter = Completer<void>();
 
   @override
   void initState() {
     super.initState();
 
-    localConfigService.read(configKey: ConfigEnum.downloadPageBodyType).then((bodyTypeString) {
+    localConfigService
+        .read(configKey: ConfigEnum.downloadPageBodyType)
+        .then((bodyTypeString) {
       if (bodyTypeString != null) {
-        bodyType = DownloadPageBodyType.values[int.tryParse(bodyTypeString) ?? 0];
+        bodyType =
+            DownloadPageBodyType.values[int.tryParse(bodyTypeString) ?? 0];
       }
     }).whenComplete(() {
       bodyTypeCompleter.complete();
+      localGalleryService.ensureScanned();
     });
   }
 
@@ -51,24 +59,48 @@ class _DownloadPageState extends State<DownloadPage> {
             galleryType = notification.galleryType ?? galleryType;
             bodyType = notification.bodyType ?? bodyType;
           });
-          localConfigService.write(configKey: ConfigEnum.downloadPageBodyType, value: (notification.bodyType ?? bodyType).index.toString());
+          localConfigService.write(
+              configKey: ConfigEnum.downloadPageBodyType,
+              value: (notification.bodyType ?? bodyType).index.toString());
           return true;
         },
-        child: FutureBuilder(
-          future: bodyTypeCompleter.future,
-          builder: (_, __) => !bodyTypeCompleter.isCompleted
-              ? const Center()
-              : galleryType == DownloadPageGalleryType.download
-                  ? bodyType == DownloadPageBodyType.list
-                      ? GalleryListDownloadPage(key: const PageStorageKey('GalleryListDownloadBody'))
-                      : GalleryGridDownloadPage(key: const PageStorageKey('GalleryGridDownloadBody'))
-                  : galleryType == DownloadPageGalleryType.archive
+        child: Stack(
+          children: [
+            FutureBuilder(
+              future: bodyTypeCompleter.future,
+              builder: (_, __) => !bodyTypeCompleter.isCompleted
+                  ? const Center()
+                  : galleryType == DownloadPageGalleryType.download
                       ? bodyType == DownloadPageBodyType.list
-                          ? ArchiveListDownloadPage(key: const PageStorageKey('ArchiveListDownloadBody'))
-                          : ArchiveGridDownloadPage(key: const PageStorageKey('ArchiveGridDownloadBody'))
-                      : bodyType == DownloadPageBodyType.list
-                          ? LocalGalleryListPage(key: const PageStorageKey('LocalGalleryListBody'))
-                          : LocalGalleryGridPage(key: const PageStorageKey('LocalGalleryGridBody')),
+                          ? GalleryListDownloadPage(
+                              key: const PageStorageKey(
+                                  'GalleryListDownloadBody'))
+                          : GalleryGridDownloadPage(
+                              key: const PageStorageKey(
+                                  'GalleryGridDownloadBody'))
+                      : galleryType == DownloadPageGalleryType.archive
+                          ? bodyType == DownloadPageBodyType.list
+                              ? ArchiveListDownloadPage(
+                                  key: const PageStorageKey(
+                                      'ArchiveListDownloadBody'))
+                              : ArchiveGridDownloadPage(
+                                  key: const PageStorageKey(
+                                      'ArchiveGridDownloadBody'))
+                          : bodyType == DownloadPageBodyType.list
+                              ? LocalGalleryListPage(
+                                  key: const PageStorageKey(
+                                      'LocalGalleryListBody'))
+                              : LocalGalleryGridPage(
+                                  key: const PageStorageKey(
+                                      'LocalGalleryGridBody')),
+            ),
+            const Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: _LocalGalleryScanProgressBanner(),
+            ),
+          ],
         ),
       ),
     ).enableMouseDrag();
@@ -89,7 +121,8 @@ class DownloadPageBodyTypeChangeNotification extends Notification {
 class DownloadPageSegmentControl extends StatelessWidget {
   final DownloadPageGalleryType galleryType;
 
-  const DownloadPageSegmentControl({Key? key, required this.galleryType}) : super(key: key);
+  const DownloadPageSegmentControl({Key? key, required this.galleryType})
+      : super(key: key);
 
   @override
   Widget build(BuildContext context) {
@@ -102,7 +135,9 @@ class DownloadPageSegmentControl extends StatelessWidget {
           child: Center(
             child: Text(
               'download'.tr,
-              style: const TextStyle(fontSize: UIConfig.downloadPageSegmentedTextSize, fontWeight: FontWeight.bold),
+              style: const TextStyle(
+                  fontSize: UIConfig.downloadPageSegmentedTextSize,
+                  fontWeight: FontWeight.bold),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
@@ -110,18 +145,24 @@ class DownloadPageSegmentControl extends StatelessWidget {
         ),
         DownloadPageGalleryType.archive: Text(
           'archive'.tr,
-          style: const TextStyle(fontSize: UIConfig.downloadPageSegmentedTextSize, fontWeight: FontWeight.bold),
+          style: const TextStyle(
+              fontSize: UIConfig.downloadPageSegmentedTextSize,
+              fontWeight: FontWeight.bold),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
         DownloadPageGalleryType.local: Text(
           'local'.tr,
-          style: const TextStyle(fontSize: UIConfig.downloadPageSegmentedTextSize, fontWeight: FontWeight.bold),
+          style: const TextStyle(
+              fontSize: UIConfig.downloadPageSegmentedTextSize,
+              fontWeight: FontWeight.bold),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
       },
-      onValueChanged: (value) => DownloadPageBodyTypeChangeNotification(galleryType: value!).dispatch(context),
+      onValueChanged: (value) =>
+          DownloadPageBodyTypeChangeNotification(galleryType: value!)
+              .dispatch(context),
     );
   }
 }
@@ -135,9 +176,11 @@ class GroupOpenIndicator extends StatefulWidget {
   State<GroupOpenIndicator> createState() => _GroupOpenIndicatorState();
 }
 
-class _GroupOpenIndicatorState extends State<GroupOpenIndicator> with AnimationMixin {
+class _GroupOpenIndicatorState extends State<GroupOpenIndicator>
+    with AnimationMixin {
   bool isOpen = false;
-  late Animation<double> animation = Tween<double>(begin: 0.0, end: -0.25).animate(controller);
+  late Animation<double> animation =
+      Tween<double>(begin: 0.0, end: -0.25).animate(controller);
 
   @override
   void initState() {
@@ -170,6 +213,91 @@ class _GroupOpenIndicatorState extends State<GroupOpenIndicator> with AnimationM
     return RotationTransition(
       turns: animation,
       child: const Icon(Icons.keyboard_arrow_left),
+    );
+  }
+}
+
+class _LocalGalleryScanProgressBanner extends StatelessWidget {
+  const _LocalGalleryScanProgressBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    return GetBuilder<GalleryDownloadService>(
+      id: galleryDownloadService.galleryCountChangedId,
+      builder: (_) => GetBuilder<LocalGalleryService>(
+        id: localGalleryService.galleryCountChangedId,
+        builder: (_) {
+          bool isRestoring = galleryDownloadService.isRestoring;
+          bool isLocalScanning =
+              localGalleryService.loadingState == LoadingState.loading;
+          bool isLoading = isRestoring || isLocalScanning;
+
+          return AnimatedSwitcher(
+            duration: const Duration(milliseconds: 200),
+            child: isLoading
+                ? _buildBanner(context, isRestoring)
+                : const SizedBox.shrink(),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildBanner(BuildContext context, bool preferDownload) {
+    String progressText;
+
+    if (preferDownload) {
+      if (galleryDownloadService.restoreTotalCount > 0) {
+        progressText = '${'scanningLocalGallerys'.tr} '
+            '${galleryDownloadService.restoreCurrentCount}/'
+            '${galleryDownloadService.restoreTotalCount}';
+      } else {
+        progressText = '${'scanningLocalGallerys'.tr}...';
+      }
+    } else if (localGalleryService.totalDirectoryCount > 0) {
+      progressText = '${'scanningLocalGallerys'.tr} '
+          '${localGalleryService.scannedDirectoryCount}/'
+          '${localGalleryService.totalDirectoryCount}';
+    } else {
+      progressText = '${'scanningLocalGallerys'.tr} '
+          '${localGalleryService.scannedDirectoryCount}';
+    }
+
+    return Material(
+      elevation: 4,
+      color: Theme.of(context).colorScheme.primaryContainer,
+      child: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(
+                    Theme.of(context).colorScheme.onPrimaryContainer,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  progressText,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: Theme.of(context).colorScheme.onPrimaryContainer,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

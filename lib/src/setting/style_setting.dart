@@ -120,13 +120,13 @@ class StyleSetting with JHLifeCircleBeanWithConfigStorage implements JHLifeCircl
 
   Future<void> saveLightThemeColor(Color color) async {
     log.debug('saveLightThemeColor:$color');
-    this.lightThemeColor.value = color;
+    lightThemeColor.value = color;
     await saveBeanConfig();
   }
 
   Future<void> saveDarkThemeColor(Color color) async {
     log.debug('saveDarkThemeColor:$color');
-    this.darkThemeColor.value = color;
+    darkThemeColor.value = color;
     await saveBeanConfig();
   }
 
@@ -163,9 +163,9 @@ class StyleSetting with JHLifeCircleBeanWithConfigStorage implements JHLifeCircl
   Future<void> savePageListMode(String routeName, ListMode? listMode) async {
     log.debug('savePageListMode:$routeName, $listMode');
     if (listMode == null) {
-      this.pageListMode.remove(routeName);
+      pageListMode.remove(routeName);
     } else {
-      this.pageListMode[routeName] = listMode;
+      pageListMode[routeName] = listMode;
     }
     await saveBeanConfig();
   }
@@ -178,7 +178,7 @@ class StyleSetting with JHLifeCircleBeanWithConfigStorage implements JHLifeCircl
 
   Future<void> saveLayoutMode(LayoutMode layoutMode) async {
     log.debug('saveLayoutMode:${layoutMode.name}');
-    this.layout.value = layoutMode;
+    layout.value = layoutMode;
     await saveBeanConfig();
   }
 }

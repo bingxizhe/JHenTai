@@ -110,9 +110,7 @@ class _ArchiveBotSettingsPageState extends State<ArchiveBotSettingsPage> {
     );
 
     if (result == true) {
-      setStateSafely(() {
-        _checkBalance();
-      });
+      setStateSafely(_checkBalance);
     }
   }
 

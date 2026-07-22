@@ -29,17 +29,17 @@ class GalleryHistoryModel {
 
   Map<String, dynamic> toJson() {
     return {
-      "galleryUrl": this.galleryUrl.url,
-      "title": this.title,
-      "category": this.category,
-      "coverUrl": this.coverUrl,
-      "pageCount": this.pageCount,
-      "rating": this.rating,
-      "language": this.language,
-      "uploader": this.uploader,
-      "publishTime": this.publishTime,
-      "isExpunged": this.isExpunged,
-      "tags": this.tags,
+      "galleryUrl": galleryUrl.url,
+      "title": title,
+      "category": category,
+      "coverUrl": coverUrl,
+      "pageCount": pageCount,
+      "rating": rating,
+      "language": language,
+      "uploader": uploader,
+      "publishTime": publishTime,
+      "isExpunged": isExpunged,
+      "tags": tags,
     };
   }
 

@@ -172,7 +172,7 @@ class _CookiePageState extends State<CookiePage> {
         _refreshIgneousState = LoadingState.error;
       });
       return;
-    } catch (e, s) {
+    } catch (e) {
       log.error('Refresh igneous failed: $e');
       snack('refreshIgneousFailed'.tr, e.toString());
       setStateSafely(() {

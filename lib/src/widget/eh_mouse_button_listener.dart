@@ -27,7 +27,7 @@ class EHMouseButtonListener extends StatelessWidget {
 
     if (forthCallback != null || fifthCallback != null) {
       gestures[ForthAndFifthButtonTapGestureRecognizer] = GestureRecognizerFactoryWithHandlers<ForthAndFifthButtonTapGestureRecognizer>(
-        () => ForthAndFifthButtonTapGestureRecognizer(),
+        ForthAndFifthButtonTapGestureRecognizer.new,
         (ForthAndFifthButtonTapGestureRecognizer instance) {
           instance
             ..onForthTapDown = forthCallback != null ? (_) => forthCallback() : null

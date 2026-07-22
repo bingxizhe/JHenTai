@@ -8,7 +8,11 @@ import '../mixin/grid_download_page_service_mixin.dart';
 import '../mixin/grid_download_page_state_mixin.dart';
 import 'local_gallery_grid_page_state.dart';
 
-class LocalGalleryGridPageLogic extends GetxController with Scroll2TopLogicMixin, GridBasePageLogic, LocalGalleryDownloadPageLogicMixin {
+class LocalGalleryGridPageLogic extends GetxController
+    with
+        Scroll2TopLogicMixin,
+        GridBasePageLogic,
+        LocalGalleryDownloadPageLogicMixin {
   LocalGalleryGridPageState state = LocalGalleryGridPageState();
 
   @override
@@ -27,6 +31,12 @@ class LocalGalleryGridPageLogic extends GetxController with Scroll2TopLogicMixin
   set currentPath(String value) => state.currentGroup = value;
 
   @override
+  void onInit() {
+    super.onInit();
+    localGalleryService.ensureScanned();
+  }
+
+  @override
   void backGroup() {
     backRoute();
   }
@@ -37,7 +47,8 @@ class LocalGalleryGridPageLogic extends GetxController with Scroll2TopLogicMixin
   }
 
   @override
-  Future<void> saveGalleryOrderAfterDrag(int beforeIndex, int afterIndex) async {}
+  Future<void> saveGalleryOrderAfterDrag(
+      int beforeIndex, int afterIndex) async {}
 
   @override
   Future<void> saveGroupOrderAfterDrag(int beforeIndex, int afterIndex) async {}

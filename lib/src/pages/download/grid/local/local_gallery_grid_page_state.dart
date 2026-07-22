@@ -1,4 +1,3 @@
-import 'package:get/get.dart';
 import 'package:jhentai/src/service/local_gallery_service.dart';
 
 import '../../../../mixin/scroll_to_top_state_mixin.dart';

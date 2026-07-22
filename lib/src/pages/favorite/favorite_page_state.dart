@@ -9,4 +9,20 @@ class FavoritePageState extends BasePageState {
 
   @override
   SearchConfig searchConfig = SearchConfig(searchType: SearchType.favorite);
+
+  /// batch download progress
+  bool isBatchDownloading = false;
+  int batchDownloadTotalCount = 0;
+  int batchDownloadCurrentCount = 0;
+
+  /// 'loadingFavorites' or 'downloading'
+  String batchDownloadPhase = '';
+
+  /// failure countdown: when loading retries are exhausted, record the failure
+  /// time so the user can resume within 30 minutes.
+  DateTime? batchDownloadFailureTime;
+
+  /// phase in which the failure occurred ('loadingFavorites' or 'downloading'),
+  /// used for toast messaging.
+  String batchDownloadFailurePhase = '';
 }

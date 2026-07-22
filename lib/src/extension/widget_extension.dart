@@ -37,7 +37,7 @@ extension WidgetExtension on Widget {
     return EHKeyboardListener(
       keyHandlers: {LogicalKeyboardKey.escape: popRightRoute},
       child: EHMouseButtonListener(
-        mouseHandlers: {kBackMouseButton: popRightRoute},
+        mouseHandlers: const {kBackMouseButton: popRightRoute},
         child: this,
       ),
     );
@@ -54,6 +54,7 @@ extension WidgetExtension on Widget {
 extension StateExtension on State {
   void setStateSafely(VoidCallback fn) {
     if (mounted) {
+      // ignore: invalid_use_of_protected_member
       setState(fn);
     }
   }

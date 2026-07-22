@@ -196,12 +196,12 @@ class _LineGraph extends StatelessWidget {
             tooltipSettings: const InteractiveTooltip(format: 'point.x: point.y'),
             hideDelay: 1500,
           ),
-          primaryXAxis: CategoryAxis(
+          primaryXAxis: const CategoryAxis(
             tickPosition: TickPosition.inside,
-            majorGridLines: const MajorGridLines(width: 0),
-            majorTickLines: const MajorTickLines(width: 1, size: 3),
+            majorGridLines: MajorGridLines(width: 0),
+            majorTickLines: MajorTickLines(width: 1, size: 3),
             edgeLabelPlacement: EdgeLabelPlacement.shift,
-            labelStyle: const TextStyle(fontSize: 10),
+            labelStyle: TextStyle(fontSize: 10),
           ),
           primaryYAxis: NumericAxis(
             title: AxisTitle(
@@ -224,7 +224,7 @@ class _LineGraph extends StatelessWidget {
               majorTickLines: const MajorTickLines(width: 1, size: 3),
             ),
           ],
-          legend: Legend(isVisible: true, position: LegendPosition.bottom),
+          legend: const Legend(isVisible: true, position: LegendPosition.bottom),
           series: <CartesianSeries<VisitStat, String>>[
             LineSeries<VisitStat, String>(
               name: 'visits'.tr,

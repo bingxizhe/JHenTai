@@ -114,10 +114,18 @@ void main(List<String> args) async {
   ));
 
   lifeCircleBeans = topologicalSort(lifeCircleBeans);
+  final Stopwatch totalSw = Stopwatch()..start();
   for (JHLifeCircleBean bean in lifeCircleBeans) {
+    final Stopwatch sw = Stopwatch()..start();
     await bean.initBean();
+    sw.stop();
+    if (sw.elapsedMilliseconds > 50) {
+      debugPrint(
+          '[startup] ${bean.runtimeType}.initBean took ${sw.elapsedMilliseconds}ms');
+    }
   }
-
+  totalSw.stop();
+  debugPrint('[startup] total initBean took ${totalSw.elapsedMilliseconds}ms');
   runApp(const MyApp());
 }
 
@@ -129,8 +137,10 @@ class MyApp extends StatelessWidget {
     return GetMaterialApp(
       title: 'JHenTai',
       themeMode: styleSetting.themeMode.value,
-      theme: ThemeConfig.theme(styleSetting.lightThemeColor.value, Brightness.light),
-      darkTheme: ThemeConfig.theme(styleSetting.darkThemeColor.value, Brightness.dark),
+      theme: ThemeConfig.theme(
+          styleSetting.lightThemeColor.value, Brightness.light),
+      darkTheme:
+          ThemeConfig.theme(styleSetting.darkThemeColor.value, Brightness.dark),
 
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
@@ -149,16 +159,21 @@ class MyApp extends StatelessWidget {
       translations: LocaleText(),
 
       getPages: Routes.pages,
-      initialRoute: securitySetting.enablePasswordAuth.isTrue || securitySetting.enableBiometricAuth.isTrue ? Routes.lock : Routes.home,
+      initialRoute: securitySetting.enablePasswordAuth.isTrue ||
+              securitySetting.enableBiometricAuth.isTrue
+          ? Routes.lock
+          : Routes.home,
       navigatorObservers: [GetXRouterObserver()],
       builder: (context, child) => AppManager(child: child!),
 
       /// enable swipe back feature
       popGesture: preferenceSetting.enableSwipeBackGesture.isTrue,
       onReady: () {
+        debugPrint('[startup] onReady fired (UI should be visible now)');
         for (JHLifeCircleBean bean in lifeCircleBeans) {
           bean.afterBeanReady();
         }
+        debugPrint('[startup] afterBeanReady completed');
       },
     );
   }
