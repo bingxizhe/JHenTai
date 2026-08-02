@@ -1,3 +1,4 @@
+import 'package:flutter/rendering.dart';
 import 'package:animate_do/animate_do.dart';
 import 'package:collection/collection.dart';
 import 'package:dio/dio.dart';
@@ -125,7 +126,7 @@ class _EHSearchConfigDialogState extends State<EHSearchConfigDialog> {
       controller: _bodyScrollController,
       child: ListView(
         controller: _bodyScrollController,
-        cacheExtent: 3000,
+        scrollCacheExtent: ScrollCacheExtent.pixels(3000),
         padding: const EdgeInsets.symmetric(horizontal: 10),
         children: [
           if (widget.type != EHSearchConfigDialogType.filter) _buildSearchConfigName(),
@@ -756,21 +757,36 @@ class _EHSearchConfigDialogState extends State<EHSearchConfigDialog> {
       suggestions = await tagTranslationService.searchTags(keyword, limit: 100);
     } else {
       try {
-        List<EHRawTag> tags = await ehRequest.requestTagSuggestion(keyword, EHSpiderParser.tagSuggestion2TagList);
-        suggestions = tags
-            .map((t) => (
-                  searchText: keyword,
-                  matchStart: 0,
-                  matchEnd: keyword.length,
-                  tagData: TagData(namespace: t.namespace, key: t.key),
-                  operator: null,
-                  score: 0.0,
-                  namespaceMatch: t.namespace.contains(keyword) ? (start: t.namespace.indexOf(keyword), end: t.namespace.indexOf(keyword) + keyword.length) : null,
-                  translatedNamespaceMatch: null,
-                  keyMatch: t.key.contains(keyword) ? (start: t.key.indexOf(keyword), end: t.key.indexOf(keyword) + keyword.length) : null,
-                  tagNameMatch: null,
-                ))
-            .toList();
+        String lastPart = keyword.split(' ').last;
+        String effectivePart = lastPart;
+        String? operator;
+        if (lastPart.startsWith('-') || lastPart.startsWith('~')) {
+          operator = lastPart[0];
+          effectivePart = lastPart.substring(1);
+        }
+
+        if (effectivePart.isEmpty) {
+          suggestions = [];
+        } else {
+          List<EHRawTag> tags = await ehRequest.requestTagSuggestion(effectivePart, EHSpiderParser.tagSuggestion2TagList);
+          suggestions = tags
+              .map((t) => (
+                    searchText: keyword,
+                    matchStart: keyword.length - lastPart.length,
+                    matchEnd: keyword.length,
+                    tagData: TagData(namespace: t.namespace, key: t.key),
+                    operator: operator,
+                    score: 0.0,
+                    namespaceMatch: t.namespace.contains(effectivePart)
+                        ? (start: t.namespace.indexOf(effectivePart), end: t.namespace.indexOf(effectivePart) + effectivePart.length)
+                        : null,
+                    translatedNamespaceMatch: null,
+                    keyMatch:
+                        t.key.contains(effectivePart) ? (start: t.key.indexOf(effectivePart), end: t.key.indexOf(effectivePart) + effectivePart.length) : null,
+                    tagNameMatch: null,
+                  ))
+              .toList();
+        }
       } on DioException catch (e) {
         log.error('Request tag suggestion failed', e);
         suggestions = [];

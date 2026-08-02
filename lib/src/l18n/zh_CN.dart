@@ -34,6 +34,8 @@ class zh_CN {
       'receiveDataTimeoutHint': '网络接收数据超时',
       'archiveError': '下载归档错误',
       'edit': '编辑',
+      'confirmDestructiveActions': '二次确认破坏性操作',
+      'confirmDestructiveActionsHint': '开启后，在下载页删除任务、重新下载等破坏性操作前会弹出确认框',
 
       'home': "主页",
       'gallery': "画廊",
@@ -504,6 +506,7 @@ class zh_CN {
       'left2rightList': '从左至右(连续)',
       'right2leftList': '从右至左(连续)',
       'enablePageTurnByVolumeKeys': '使用音量键翻页',
+      'enablePageTurnByVolumeKeysHint': 'iOS 上，若音量为 0 或 100%，进入阅读页时音量将被自动调整以支持翻页，退出后恢复',
       'enablePageTurnAnime': '开启翻页动画',
       'enableDoubleTapToScaleUp': '允许双击放大图片',
       'enableTapDragToScaleUp': '允许单击后拖拽放大图片',

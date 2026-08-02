@@ -1,3 +1,4 @@
+import 'package:flutter/rendering.dart';
 import 'package:animate_do/animate_do.dart';
 import 'package:flex_color_picker/flex_color_picker.dart';
 import 'package:flutter/material.dart';
@@ -7,11 +8,10 @@ import 'package:jhentai/src/config/ui_config.dart';
 import 'package:jhentai/src/model/tag_set.dart';
 import 'package:jhentai/src/pages/setting/eh/tagsets/tag_sets_page_logic.dart';
 import 'package:jhentai/src/pages/setting/eh/tagsets/tag_sets_page_state.dart';
-import 'package:jhentai/src/utils/search_util.dart';
-import 'package:jhentai/src/widget/eh_wheel_speed_controller.dart';
 
 import '../../../../utils/route_util.dart';
 import '../../../../utils/text_input_formatter.dart';
+import '../../../../widget/eh_wheel_speed_controller.dart';
 import '../../../../widget/loading_state_indicator.dart';
 
 class TagSetsPage extends StatelessWidget {
@@ -112,7 +112,7 @@ class TagSetsPage extends StatelessWidget {
             child: SafeArea(
               child: ListView.builder(
                 itemExtent: 64,
-                cacheExtent: 3000,
+                scrollCacheExtent: ScrollCacheExtent.pixels(3000),
                 itemCount: state.tags.length,
                 controller: state.scrollController,
                 itemBuilder: (_, int index) => GetBuilder<TagSetsLogic>(
@@ -123,8 +123,8 @@ class TagSetsPage extends StatelessWidget {
                       child: _Tag(
                         tag: state.tags[index],
                         tagSetBackgroundColor: state.currentTagSetBackgroundColor,
-                        onTap: () => logic.showBottomSheet(index, context),
-                        onLongPress: () => newSearch(keyword: '${state.tags[index].tagData.namespace}:${state.tags[index].tagData.key}'),
+                        onLongPress: (position) => logic.showBottomSheet(index, context, position: position),
+                        onSecondaryTap: (position) => logic.showBottomSheet(index, context, position: position),
                         onColorUpdated: (v) => logic.handleUpdateTagColor(index, v),
                         onWeightUpdated: (v) => logic.handleUpdateTagWeight(index, v),
                         onStatusUpdated: (v) => logic.handleUpdateTagStatus(index, v),
@@ -145,8 +145,8 @@ class TagSetsPage extends StatelessWidget {
 class _Tag extends StatelessWidget {
   final WatchedTag tag;
   final Color? tagSetBackgroundColor;
-  final VoidCallback? onTap;
-  final VoidCallback? onLongPress;
+  final void Function(Offset position)? onLongPress;
+  final void Function(Offset position)? onSecondaryTap;
   final ValueChanged<Color?> onColorUpdated;
   final ValueChanged<String> onWeightUpdated;
   final ValueChanged<TagSetStatus> onStatusUpdated;
@@ -155,8 +155,8 @@ class _Tag extends StatelessWidget {
     Key? key,
     required this.tag,
     this.tagSetBackgroundColor,
-    this.onTap,
     this.onLongPress,
+    this.onSecondaryTap,
     required this.onColorUpdated,
     required this.onWeightUpdated,
     required this.onStatusUpdated,
@@ -166,14 +166,10 @@ class _Tag extends StatelessWidget {
   Widget build(BuildContext context) {
     return Center(
       child: GestureDetector(
-        onSecondaryTap: onTap,
+        onLongPressStart: onLongPress == null ? null : (details) => onLongPress!(details.globalPosition),
+        onSecondaryTapDown: onSecondaryTap == null ? null : (details) => onSecondaryTap!(details.globalPosition),
         child: ListTile(
           dense: true,
-          onTap: () {
-            Get.focusScope?.unfocus();
-            onTap?.call();
-          },
-          onLongPress: onLongPress,
           leading: _buildLeadingIcon(context),
           title: Text(tag.tagData.translatedNamespace == null
               ? '${tag.tagData.namespace}:${tag.tagData.key}'

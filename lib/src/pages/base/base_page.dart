@@ -1,6 +1,5 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:get/get.dart';
 import 'package:jhentai/src/pages/layout/mobile_v2/notification/tap_menu_button_notification.dart';
 import 'package:jhentai/src/setting/style_setting.dart';
@@ -70,7 +69,7 @@ abstract class BasePage<L extends BasePageLogic, S extends BasePageState> extend
 
   Widget buildAppBarMenuButton(BuildContext context) {
     return IconButton(
-      icon: const Icon(FontAwesomeIcons.bars, size: 20),
+      icon: Icon(Icons.menu, size: 20),
       onPressed: () => TapMenuButtonNotification().dispatch(context),
     );
   }
@@ -78,7 +77,7 @@ abstract class BasePage<L extends BasePageLogic, S extends BasePageState> extend
   List<Widget> buildAppBarActions() {
     return [
       if (showJumpButton && state.gallerys.isNotEmpty)
-        IconButton(icon: const Icon(FontAwesomeIcons.paperPlane, size: 20), onPressed: logic.handleTapJumpButton),
+        IconButton(icon: Icon(Icons.send, size: 20), onPressed: logic.handleTapJumpButton),
       if (showFilterButton) IconButton(icon: const Icon(Icons.filter_alt_outlined, size: 28), onPressed: logic.handleTapFilterButton),
     ];
   }
@@ -171,8 +170,8 @@ abstract class BasePage<L extends BasePageLogic, S extends BasePageState> extend
         listMode: styleSetting.pageListMode[state.route] ?? styleSetting.listMode.value,
         loadingState: state.loadingState,
         handleTapCard: logic.handleTapGalleryCard,
-        handleLongPressCard: (gallery) => logic.handleLongPressCard(context, gallery),
-        handleSecondaryTapCard: (gallery) => logic.handleSecondaryTapCard(context, gallery),
+        handleLongPressCard: (gallery, position) => logic.handleLongPressCard(context, gallery, position: position),
+        handleSecondaryTapCard: (gallery, position) => logic.handleSecondaryTapCard(context, gallery, position: position),
         handleLoadMore: logic.loadMore,
       ),
     );

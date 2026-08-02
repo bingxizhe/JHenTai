@@ -20,8 +20,8 @@ Widget EHGalleryCollection({
   required ListMode listMode,
   required LoadingState loadingState,
   required CardCallback handleTapCard,
-  CardCallback? handleLongPressCard,
-  CardCallback? handleSecondaryTapCard,
+  CardContextMenuCallback? handleLongPressCard,
+  CardContextMenuCallback? handleSecondaryTapCard,
   VoidCallback? handleLoadMore,
 }) {
   Widget _buildGalleryList() {
@@ -46,8 +46,8 @@ Widget EHGalleryCollection({
               downloaded: galleryDownloadService.containGallery(gallerys[index].gid) || archiveDownloadService.containArchive(gallerys[index].gid),
               listMode: listMode,
               handleTapCard: (gallery) => handleTapCard(gallery),
-              handleLongPressCard: handleLongPressCard == null ? null : (gallery) => handleLongPressCard(gallery),
-              handleSecondaryTapCard: handleSecondaryTapCard == null ? null : (gallery) => handleSecondaryTapCard(gallery),
+              handleLongPressCard: handleLongPressCard == null ? null : (gallery, position) => handleLongPressCard(gallery, position),
+              handleSecondaryTapCard: handleSecondaryTapCard == null ? null : (gallery, position) => handleSecondaryTapCard(gallery, position),
               withTags: listMode == ListMode.listWithTags || listMode == ListMode.flat,
             ),
           );
@@ -87,8 +87,8 @@ Widget EHGalleryCollection({
               downloaded: galleryDownloadService.containGallery(gallerys[index].gid) || archiveDownloadService.containArchive(gallerys[index].gid),
               listMode: listMode,
               handleTapCard: handleTapCard,
-              handleLongPressCard: handleLongPressCard == null ? null : (gallery) => handleLongPressCard(gallery),
-              handleSecondaryTapCard: handleSecondaryTapCard == null ? null : (gallery) => handleSecondaryTapCard(gallery),
+              handleLongPressCard: handleLongPressCard == null ? null : (gallery, position) => handleLongPressCard(gallery, position),
+              handleSecondaryTapCard: handleSecondaryTapCard == null ? null : (gallery, position) => handleSecondaryTapCard(gallery, position),
             );
           },
           childCount: gallerys.length,

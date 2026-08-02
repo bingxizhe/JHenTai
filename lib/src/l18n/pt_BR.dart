@@ -34,6 +34,8 @@ class pt_BR {
       'receiveDataTimeoutHint': 'Network receive data timeout',
       'archiveError': 'Download Archive Error',
       'edit': 'Edit',
+      'confirmDestructiveActions': 'Confirmar ações destrutivas',
+      'confirmDestructiveActionsHint': 'Mostrar um diálogo de confirmação antes de ações destrutivas, como excluir tarefas ou baixar novamente na página de downloads',
 
       'home': "Home",
       'gallery': "Galeria",
@@ -500,6 +502,7 @@ class pt_BR {
       'left2rightList': 'Left to Right (Continuous)',
       'right2leftList': 'Right to Left (Continuous)',
       'enablePageTurnByVolumeKeys': 'Use volume key to turn page',
+      'enablePageTurnByVolumeKeysHint': 'No iOS, se o volume estiver em 0 ou 100%, ele será ajustado automaticamente ao entrar no leitor para suportar a virada de página e restaurado ao sair',
       'enablePageTurnAnime': 'Ativar animação de virada',
       'enableDoubleTapToScaleUp': 'Ativar toque duplo para aumentar a escala',
       'enableTapDragToScaleUp': 'Enable Tap Drag to Scale up',
