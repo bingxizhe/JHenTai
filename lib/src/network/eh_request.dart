@@ -420,8 +420,6 @@ emyPxgcYxn/eR44/KJ4EBs+lVDR3veyJm+kXQ99b21/+jh5Xos1AnX5iItreGCc=
       case RanklistType.allTime:
         tl = 11;
         break;
-      default:
-        tl = 15;
     }
 
     Response response = await _getWithErrorHandler('${EHConsts.ERanklist}?tl=$tl&p=$pageNo');

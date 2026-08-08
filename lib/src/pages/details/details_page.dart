@@ -1183,31 +1183,6 @@ class DetailsPage extends StatelessWidget with Scroll2TopPageMixin {
     );
   }
 
-  Widget _buildStatisticButton(BuildContext context) {
-    return GetBuilder<DetailsPageLogic>(
-      id: DetailsPageLogic.detailsId,
-      global: false,
-      init: logic,
-      builder: (_) {
-        bool disabled = state.galleryDetails == null;
-
-        return IconTextButton(
-          width: UIConfig.detailsPageActionExtent,
-          icon: Icon(Icons.analytics, color: disabled ? UIConfig.detailsPageActionDisabledIconColor(context) : UIConfig.detailsPageActionIconColor(context)),
-          text: Text(
-            'statistic'.tr,
-            style: TextStyle(
-              fontSize: UIConfig.detailsPageActionTextSize,
-              color: disabled ? UIConfig.detailsPageActionDisabledIconColor(context) : UIConfig.detailsPageActionTextColor(context),
-              height: 1,
-            ),
-          ),
-          onPressed: state.galleryDetails == null ? null : logic.handleTapStatistic,
-        );
-      },
-    );
-  }
-
   Widget buildLoadingDetailsIndicator() {
     return SliverToBoxAdapter(
       child: GetBuilder<DetailsPageLogic>(

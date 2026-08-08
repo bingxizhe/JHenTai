@@ -44,6 +44,12 @@ class GalleryGridDownloadPageLogic extends GetxController
   @override
   GridBasePageServiceMixin get galleryService => downloadService;
 
+  @override
+  void onInit() {
+    super.onInit();
+    downloadService.ensureRestored();
+  }
+
   void handleTapTitle(GalleryDownloadedData gallery) {
     if (multiSelectDownloadPageState.inMultiSelectMode) {
       toggleSelectItem(gallery.gid);

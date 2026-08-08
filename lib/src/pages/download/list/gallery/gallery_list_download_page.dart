@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_slidable/flutter_slidable.dart';
 import 'package:get/get.dart';
 import 'package:jhentai/src/config/ui_config.dart';
-import 'package:jhentai/src/extension/widget_extension.dart';
 import 'package:jhentai/src/model/gallery_url.dart';
 import 'package:jhentai/src/pages/download/mixin/gallery/gallery_download_page_mixin.dart';
 import 'package:jhentai/src/service/super_resolution_service.dart' as srs;
@@ -330,9 +329,13 @@ class GalleryListDownloadPage extends StatelessWidget with Scroll2TopPageMixin, 
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             if (gallery.uploader != null)
-              Text(
-                gallery.uploader!,
-                style: TextStyle(fontSize: UIConfig.downloadPageCardTextSize, color: UIConfig.downloadPageCardTextColor(context)),
+              Flexible(
+                child: Text(
+                  gallery.uploader!,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: UIConfig.downloadPageCardTextSize, color: UIConfig.downloadPageCardTextColor(context)),
+                ),
               ),
             Text(
               preferenceSetting.showUtcTime.isTrue ? gallery.publishTime : DateUtil.transformUtc2LocalTimeString(gallery.publishTime),

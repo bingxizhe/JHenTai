@@ -33,6 +33,8 @@ class GalleryListDownloadPageLogic extends GetxController
   Future<void> onInit() async {
     super.onInit();
 
+    downloadService.ensureRestored();
+
     String? displayGroupsString = await localConfigService.read(configKey: ConfigEnum.displayGalleryGroups);
     if (displayGroupsString == null) {
       state.displayGroups = {'default'.tr};

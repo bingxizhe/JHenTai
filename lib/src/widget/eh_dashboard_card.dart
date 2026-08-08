@@ -89,11 +89,14 @@ class _EHDashboardCardState extends State<EHDashboardCard> {
         Row(
           children: [
             const Icon(Icons.account_circle, color: UIConfig.dashboardCardTextColor, size: 12),
-            Text(
-              widget.gallery.uploader ?? 'unknownUser'.tr,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: UIConfig.dashboardCardFooterTextColor, fontSize: 10),
-            ).marginOnly(left: 2),
+            Flexible(
+              child: Text(
+                widget.gallery.uploader ?? 'unknownUser'.tr,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: UIConfig.dashboardCardFooterTextColor, fontSize: 10),
+              ).marginOnly(left: 2),
+            ),
             const Expanded(child: SizedBox()),
             Text(
               '${widget.badge ?? ''} ${LocaleConsts.language2Abbreviation[widget.gallery.language] ?? ''}',

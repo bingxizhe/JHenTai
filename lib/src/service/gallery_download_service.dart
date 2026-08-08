@@ -952,14 +952,6 @@ class GalleryDownloadService extends GetxController
     }
   }
 
-  /// shutdown executor
-  Future<void> _shutdownExecutor() async {
-    log.info('Shutdown download executor');
-
-    await pauseAllDownloadGallery();
-    executor.close();
-  }
-
   void _submitTask({
     required int gid,
     required int priority,

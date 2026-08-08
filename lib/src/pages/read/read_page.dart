@@ -1,4 +1,4 @@
-﻿import 'dart:math';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -565,7 +565,7 @@ class _ReadPageState extends State<ReadPage> with ScrollStatusListener, WindowLi
                     (e) => PopupMenuItem<ReadDirection>(child: Text(e.name.tr), value: e),
                   )
                   .toList(),
-              onSelected: (ReadDirection value) => logic.saveReadDirection(value),
+              onSelected: logic.saveReadDirection,
             ),
           ),
           Material(

@@ -227,7 +227,7 @@ mixin GalleryDownloadPageLogicMixin on GetxController
         ),
         EHContextMenuAction(
           text: 'deleteHistoryVersions'.tr,
-          onTap: () => handleDeleteHistoryVersions(),
+          onTap: handleDeleteHistoryVersions,
         ),
         EHContextMenuAction(
           text: 'deleteTask'.tr,
