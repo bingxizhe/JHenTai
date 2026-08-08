@@ -77,7 +77,7 @@ class _EHTagState extends State<EHTag> with AnimationMixin {
     child = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        child,
+        Flexible(child: child),
         AnimatedSwitcher(
           duration: UIConfig.ehTagAnimationDuration,
           child: inDeleteMode

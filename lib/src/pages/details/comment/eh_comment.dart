@@ -131,16 +131,20 @@ class _EHCommentHeader extends StatelessWidget {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(
-          (username ?? 'unknownUser'.tr) + (fromMe ? ' (${'you'.tr})' : ''),
-          style: TextStyle(
-            fontSize: inDetailPage ? UIConfig.commentAuthorTextSizeInDetailPage : UIConfig.commentAuthorTextSizeInCommentPage,
-            fontWeight: FontWeight.bold,
-            color: username == null
-                ? UIConfig.commentUnknownAuthorTextColor(context)
-                : fromMe
-                    ? UIConfig.commentOwnAuthorTextColor(context)
-                    : UIConfig.commentOtherAuthorTextColor(context),
+        Flexible(
+          child: Text(
+            (username ?? 'unknownUser'.tr) + (fromMe ? ' (${'you'.tr})' : ''),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: inDetailPage ? UIConfig.commentAuthorTextSizeInDetailPage : UIConfig.commentAuthorTextSizeInCommentPage,
+              fontWeight: FontWeight.bold,
+              color: username == null
+                  ? UIConfig.commentUnknownAuthorTextColor(context)
+                  : fromMe
+                      ? UIConfig.commentOwnAuthorTextColor(context)
+                      : UIConfig.commentOtherAuthorTextColor(context),
+            ),
           ),
         ),
         Text(

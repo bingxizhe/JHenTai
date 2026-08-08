@@ -139,7 +139,9 @@ class _TorrentList extends StatelessWidget {
           Text(torrent.downloads.toString(), style: const TextStyle(fontSize: UIConfig.torrentDialogSubtitleTextSize)),
           const Icon(Icons.attach_file, size: UIConfig.torrentDialogSubtitleIconSize).marginOnly(left: 6),
           Text(torrent.size, style: const TextStyle(fontSize: UIConfig.torrentDialogSubtitleTextSize)),
-          Text(torrent.postTime, style: const TextStyle(fontSize: UIConfig.torrentDialogSubtitleTextSize)).marginOnly(left: 6),
+          Flexible(
+            child: Text(torrent.postTime, style: const TextStyle(fontSize: UIConfig.torrentDialogSubtitleTextSize), maxLines: 1, overflow: TextOverflow.ellipsis).marginOnly(left: 6),
+          ),
         ],
       ),
       trailing: IconButton(

@@ -217,7 +217,7 @@ class EHGalleryListCard extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             _buildRatingBar(context),
-            _buildTime(context),
+            Flexible(child: _buildTime(context)),
           ],
         ),
       ],

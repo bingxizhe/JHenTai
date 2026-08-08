@@ -412,7 +412,8 @@ class _EHDeleteHistoryVersionsDialogState
       for (GalleryDownloadedData g in allGallerys) g.galleryUrl: g,
     };
 
-    _UnionFind<int> uf = _UnionFind<int>(allGallerys.map((g) => g.gid).toSet());
+    Set<int> validGids = allGallerys.map((g) => g.gid).toSet();
+    _UnionFind<int> uf = _UnionFind<int>(validGids);
 
     for (GalleryDownloadedData g in allGallerys) {
       if (g.oldVersionGalleryUrl != null) {
@@ -424,7 +425,9 @@ class _EHDeleteHistoryVersionsDialogState
     }
 
     newLinks.forEach((g1, neighbors) {
+      if (!validGids.contains(g1)) return;
       for (int g2 in neighbors) {
+        if (!validGids.contains(g2)) continue;
         uf.union(g1, g2);
       }
     });
@@ -945,6 +948,9 @@ class _UnionFind<T> {
   }
 
   T find(T x) {
+    if (_parent[x] == null) {
+      throw StateError('UnionFind.find: element $x not found');
+    }
     if (_parent[x] != x) {
       _parent[x] = find(_parent[x]!);
     }

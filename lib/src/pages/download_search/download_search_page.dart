@@ -224,6 +224,8 @@ class DownloadSearchPage extends StatelessWidget {
 
     return Text(
       gallery.uploader!,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
       style: TextStyle(fontSize: UIConfig.galleryCardTextSize, color: UIConfig.galleryCardTextColor(context)),
     );
   }

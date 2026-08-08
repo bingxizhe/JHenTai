@@ -303,9 +303,13 @@ class ArchiveListDownloadPage extends StatelessWidget with Scroll2TopPageMixin, 
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             if (archive.uploader != null)
-              Text(
-                archive.uploader!,
-                style: TextStyle(fontSize: UIConfig.downloadPageCardTextSize, color: UIConfig.downloadPageCardTextColor(context)),
+              Flexible(
+                child: Text(
+                  archive.uploader!,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: UIConfig.downloadPageCardTextSize, color: UIConfig.downloadPageCardTextColor(context)),
+                ),
               ),
             Text(
               preferenceSetting.showUtcTime.isTrue ? archive.publishTime : DateUtil.transformUtc2LocalTimeString(archive.publishTime),
