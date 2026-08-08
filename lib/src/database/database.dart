@@ -83,7 +83,7 @@ class AppDb extends _$AppDb {
         try {
           await transaction(() async {
             if (from < 2) {
-              await m.alterTable(TableMigration(image));
+              await m.alterTable(TableMigration(image)); // ignore: experimental_member_use
             }
             if (from < 3) {
               await m.addColumn(galleryDownloadedOld, galleryDownloadedOld.downloadOriginalImage);
@@ -147,8 +147,8 @@ class AppDb extends _$AppDb {
               await m.createTable(blockRule);
             }
             if (17 <= from && from < 21) {
-              await m.alterTable(TableMigration(galleryDownloaded, newColumns: [galleryDownloaded.tags, galleryDownloaded.tagRefreshTime]));
-              await m.alterTable(TableMigration(archiveDownloaded, newColumns: [archiveDownloaded.tags, archiveDownloaded.tagRefreshTime]));
+              await m.alterTable(TableMigration(galleryDownloaded, newColumns: [galleryDownloaded.tags, galleryDownloaded.tagRefreshTime])); // ignore: experimental_member_use
+              await m.alterTable(TableMigration(archiveDownloaded, newColumns: [archiveDownloaded.tags, archiveDownloaded.tagRefreshTime])); // ignore: experimental_member_use
             }
             if (from < 21) {
               await m.createIndex(gIdxTagRefreshTime).ignoreDuplicateIndex();
@@ -159,11 +159,11 @@ class AppDb extends _$AppDb {
               await m.createTable(localConfig);
             }
             if (17 <= from && from < 23) {
-              await m.alterTable(TableMigration(archiveDownloaded, newColumns: [archiveDownloaded.parseSource]));
+              await m.alterTable(TableMigration(archiveDownloaded, newColumns: [archiveDownloaded.parseSource])); // ignore: experimental_member_use
             }
             if (from < 24) {
-              await m.alterTable(TableMigration(archiveDownloaded, newColumns: [archiveDownloaded.sanitizedTitle]));
-              await m.alterTable(TableMigration(galleryDownloaded, newColumns: [galleryDownloaded.sanitizedTitle]));
+              await m.alterTable(TableMigration(archiveDownloaded, newColumns: [archiveDownloaded.sanitizedTitle])); // ignore: experimental_member_use
+              await m.alterTable(TableMigration(galleryDownloaded, newColumns: [galleryDownloaded.sanitizedTitle])); // ignore: experimental_member_use
               await _backfillSanitizedTitles();
             }
           });
@@ -276,8 +276,8 @@ class AppDb extends _$AppDb {
   }
 
   Future<void> _deleteImageSizeColumn(Migrator m) async {
-    await m.alterTable(TableMigration(archiveDownloaded));
-    await m.alterTable(TableMigration(image));
+    await m.alterTable(TableMigration(archiveDownloaded)); // ignore: experimental_member_use
+    await m.alterTable(TableMigration(image)); // ignore: experimental_member_use
   }
 
   Future<void> _migrateSuperResolutionInfo(Migrator m) async {
