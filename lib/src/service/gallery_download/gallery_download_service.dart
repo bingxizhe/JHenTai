@@ -779,22 +779,28 @@ class GalleryDownloadService extends GetxController with GridBasePageServiceMixi
   /// [downloadSetting.restoreTasksAutomatically]. Safe to call multiple
   /// times — [restoreTasks] coalesces concurrent triggers.
   Future<void> ensureRestored() async {
+    log.info('ensureRestored: called');
     await restoreTasks();
   }
 
   Future<int> restoreTasks() async {
+    log.info('restoreTasks: awaiting completed...');
     await completed;
+    log.info('restoreTasks: completed resolved');
 
     /// Coalesce concurrent triggers (e.g. user taps "restore" while the
     /// auto-restore on startup is still running). The second caller awaits
     /// the first's result.
     if (_restoreTasksFuture != null) {
+      log.info('restoreTasks: coalescing with existing restore');
       return _restoreTasksFuture!;
     }
     _restoreTasksFuture = _doRestoreTasks();
     update([galleryCountChangedId]);
     try {
-      return await _restoreTasksFuture!;
+      int result = await _restoreTasksFuture!;
+      log.info('restoreTasks: done, restored $result galleries');
+      return result;
     } finally {
       _restoreTasksFuture = null;
       update([galleryCountChangedId]);
@@ -804,13 +810,16 @@ class GalleryDownloadService extends GetxController with GridBasePageServiceMixi
   Future<int> _doRestoreTasks() async {
     final String downloadPath = downloadSetting.downloadPath.value;
     final String visibleDirPath = pathService.getVisibleDir().path;
+    log.info('_doRestoreTasks: downloadPath=$downloadPath, visibleDirPath=$visibleDirPath');
 
     io.Directory downloadDir = io.Directory(downloadPath);
     if (!downloadDir.existsSync()) {
+      log.warning('_doRestoreTasks: download dir does not exist: $downloadPath');
       return 0;
     }
 
     final List<String> galleryDirPaths = downloadDir.listSync().whereType<io.Directory>().map((d) => d.path).toList();
+    log.info('_doRestoreTasks: found ${galleryDirPaths.length} gallery directories');
     if (galleryDirPaths.isEmpty) {
       return 0;
     }
@@ -829,12 +838,14 @@ class GalleryDownloadService extends GetxController with GridBasePageServiceMixi
       try {
         restoredList.add(_GalleryMetadataStore.readForRestore(io.Directory(galleryDirPaths[i]), downloadPath, visibleDirPath));
       } catch (e, st) {
+        log.warning('_doRestoreTasks: failed to parse metadata for ${galleryDirPaths[i]}: $e');
         restoredList.add(null);
       }
       if (i % 20 == 19) {
         await Future.delayed(Duration.zero);
       }
     }
+    log.info('_doRestoreTasks: parsed ${restoredList.whereType<Object>().length}/${galleryDirPaths.length} metadata files');
 
     int restoredCount = 0;
     for (final ({GalleryDownloadedData gallery, List<GalleryImage?> images})? restored in restoredList) {

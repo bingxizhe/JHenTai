@@ -57,14 +57,16 @@ class LocalGalleryService extends GetxController
 
   Future<void> ensureScanned() async {
     if (_hasScanned) {
+      log.info('ensureScanned: already scanned, skipping');
       return;
     }
-    log.info('ensureScanned: begin scanning local galleries');
+    log.info('ensureScanned: begin scanning local galleries, scanPaths=${downloadSetting.extraGalleryScanPath}');
     await refreshLocalGalleries();
   }
 
   Future<void> refreshLocalGalleries() {
     if (loadingState == LoadingState.loading) {
+      log.info('refreshLocalGalleries: already loading, returning existing future');
       return _refreshTask ?? Future.value();
     }
 
@@ -84,6 +86,7 @@ class LocalGalleryService extends GetxController
     path2SubDir.clear();
     update([galleryCountChangedId]);
 
+    log.info('refreshLocalGalleries: spawning isolate scanner');
     _loadGalleriesFromDiskInIsolate(preCount, completer);
     return _refreshTask!;
   }
@@ -147,10 +150,16 @@ class LocalGalleryService extends GetxController
     _scanIsolate?.kill(priority: Isolate.immediate);
     _scanReceivePort = ReceivePort();
 
+    final List<String> scanPaths =
+        downloadSetting.extraGalleryScanPath.toList(growable: false);
+    final String visibleDirPath = pathService.getVisibleDir().path;
+    log.info('_loadGalleriesFromDiskInIsolate: scanPaths=$scanPaths, visibleDirPath=$visibleDirPath');
+
     try {
       _scanReceivePort!.listen(
         (dynamic message) {
           if (message is! Map) {
+            log.warning('_loadGalleriesFromDiskInIsolate: received non-Map message: $message');
             return;
           }
 
@@ -159,9 +168,11 @@ class LocalGalleryService extends GetxController
               _handleScanProgress(message);
               break;
             case _LocalGalleryScanMessageType.done:
+              log.info('_loadGalleriesFromDiskInIsolate: received done message');
               _handleScanDone(message, preCount, start, completer);
               break;
             case _LocalGalleryScanMessageType.error:
+              log.error('_loadGalleriesFromDiskInIsolate: received error from isolate: ${message['error']}');
               _handleScanError(
                   message['error'], message['stackTrace'], completer);
               break;
@@ -173,13 +184,14 @@ class LocalGalleryService extends GetxController
         _scanLocalGalleriesInIsolate,
         {
           'sendPort': _scanReceivePort!.sendPort,
-          'scanPaths':
-              downloadSetting.extraGalleryScanPath.toList(growable: false),
-          'visibleDirPath': pathService.getVisibleDir().path,
+          'scanPaths': scanPaths,
+          'visibleDirPath': visibleDirPath,
         },
         debugName: 'local-gallery-scanner',
       );
+      log.info('_loadGalleriesFromDiskInIsolate: isolate spawned successfully');
     } catch (e, stackTrace) {
+      log.error('_loadGalleriesFromDiskInIsolate: failed to spawn isolate', e, stackTrace);
       _handleScanError(e, stackTrace, completer);
     }
   }
@@ -346,18 +358,26 @@ void _scanLocalGalleriesInIsolate(Map<String, dynamic> args) {
   SendPort sendPort = args['sendPort'];
   List<String> scanPaths = (args['scanPaths'] as List).cast<String>();
   String visibleDirPath = args['visibleDirPath'];
+  // ignore: avoid_print
+  print('[local-gallery-scanner] isolate started, scanPaths=$scanPaths, visibleDirPath=$visibleDirPath');
   _LocalGalleryScanContext context = _LocalGalleryScanContext(
       sendPort: sendPort, visibleDirPath: visibleDirPath);
 
   try {
     context.totalDirectoryCount = _countDirectoriesInIsolate(scanPaths);
+    // ignore: avoid_print
+    print('[local-gallery-scanner] counted ${context.totalDirectoryCount} directories');
     context.sendProgress('counting-done', force: true);
 
     for (String scanPath in scanPaths) {
+      // ignore: avoid_print
+      print('[local-gallery-scanner] scanning $scanPath');
       _parseLocalGalleryDirectoryInIsolate(context, Directory(scanPath), true);
     }
 
     _sortLocalGalleryScanResult(context);
+    // ignore: avoid_print
+    print('[local-gallery-scanner] done, found ${context.allGallerys.length} galleries');
     sendPort.send({
       'type': _LocalGalleryScanMessageType.done,
       'allGallerys': context.allGallerys,
@@ -367,6 +387,8 @@ void _scanLocalGalleriesInIsolate(Map<String, dynamic> args) {
       'totalDirectoryCount': context.totalDirectoryCount,
     });
   } catch (e, stackTrace) {
+    // ignore: avoid_print
+    print('[local-gallery-scanner] error: $e\n$stackTrace');
     sendPort.send({
       'type': _LocalGalleryScanMessageType.error,
       'error': e.toString(),
