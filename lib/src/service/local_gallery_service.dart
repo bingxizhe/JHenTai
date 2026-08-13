@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:isolate';
 
 import 'package:get/get.dart';
 import 'package:jhentai/src/service/gallery_download/gallery_download_service.dart';
@@ -42,8 +41,6 @@ class LocalGalleryService extends GetxController
 
   bool _hasScanned = false;
   Future<void>? _refreshTask;
-  ReceivePort? _scanReceivePort;
-  Isolate? _scanIsolate;
 
   bool get hasScanned => _hasScanned;
 
@@ -86,8 +83,8 @@ class LocalGalleryService extends GetxController
     path2SubDir.clear();
     update([galleryCountChangedId]);
 
-    log.info('refreshLocalGalleries: spawning isolate scanner');
-    _loadGalleriesFromDiskInIsolate(preCount, completer);
+    log.info('refreshLocalGalleries: starting disk scan');
+    _loadGalleriesFromDisk(preCount, completer);
     return _refreshTask!;
   }
 
@@ -143,101 +140,75 @@ class LocalGalleryService extends GetxController
     update([galleryCountChangedId]);
   }
 
-  Future<void> _loadGalleriesFromDiskInIsolate(
+  Future<void> _loadGalleriesFromDisk(
       int preCount, Completer<void> completer) async {
     DateTime start = DateTime.now();
-    _scanReceivePort?.close();
-    _scanIsolate?.kill(priority: Isolate.immediate);
-    _scanReceivePort = ReceivePort();
 
     final List<String> scanPaths =
         downloadSetting.extraGalleryScanPath.toList(growable: false);
     final String visibleDirPath = pathService.getVisibleDir().path;
-    log.info('_loadGalleriesFromDiskInIsolate: scanPaths=$scanPaths, visibleDirPath=$visibleDirPath');
+    log.info('_loadGalleriesFromDisk: scanPaths=$scanPaths, visibleDirPath=$visibleDirPath');
 
     try {
-      _scanReceivePort!.listen(
-        (dynamic message) {
-          if (message is! Map) {
-            log.warning('_loadGalleriesFromDiskInIsolate: received non-Map message: $message');
-            return;
-          }
-
-          switch (message['type']) {
-            case _LocalGalleryScanMessageType.progress:
-              _handleScanProgress(message);
-              break;
-            case _LocalGalleryScanMessageType.done:
-              log.info('_loadGalleriesFromDiskInIsolate: received done message');
-              _handleScanDone(message, preCount, start, completer);
-              break;
-            case _LocalGalleryScanMessageType.error:
-              log.error('_loadGalleriesFromDiskInIsolate: received error from isolate: ${message['error']}');
-              _handleScanError(
-                  message['error'], message['stackTrace'], completer);
-              break;
-          }
+      _LocalGalleryScanContext context = _LocalGalleryScanContext(
+        onProgress: (scanningPath, scannedDirs, galleryCount, totalDirs) {
+          this.scanningPath = scanningPath;
+          scannedDirectoryCount = scannedDirs;
+          scannedGalleryCount = galleryCount;
+          totalDirectoryCount = totalDirs;
+          update([galleryCountChangedId]);
         },
+        visibleDirPath: visibleDirPath,
       );
 
-      _scanIsolate = await Isolate.spawn(
-        _scanLocalGalleriesInIsolate,
-        {
-          'sendPort': _scanReceivePort!.sendPort,
-          'scanPaths': scanPaths,
-          'visibleDirPath': visibleDirPath,
-        },
-        debugName: 'local-gallery-scanner',
-      );
-      log.info('_loadGalleriesFromDiskInIsolate: isolate spawned successfully');
+      context.totalDirectoryCount = _countDirectories(scanPaths);
+      log.info('_loadGalleriesFromDisk: counted ${context.totalDirectoryCount} directories');
+      context.sendProgress('counting-done', force: true);
+
+      for (int i = 0; i < scanPaths.length; i++) {
+        log.info('_loadGalleriesFromDisk: scanning ${scanPaths[i]}');
+        _parseLocalGalleryDirectory(context, Directory(scanPaths[i]), true);
+        /// Yield to the event loop between scan paths so the UI stays
+        /// responsive. Individual [Directory.listSync] calls are fast enough
+        /// that we don't need per-directory yields.
+        await Future.delayed(Duration.zero);
+      }
+
+      _sortLocalGalleryScanResult(context);
+      log.info('_loadGalleriesFromDisk: done, found ${context.allGallerys.length} galleries');
+
+      _handleScanDone(context, preCount, start, completer);
     } catch (e, stackTrace) {
-      log.error('_loadGalleriesFromDiskInIsolate: failed to spawn isolate', e, stackTrace);
+      log.error('_loadGalleriesFromDisk failed', e, stackTrace);
       _handleScanError(e, stackTrace, completer);
     }
   }
 
-  void _handleScanProgress(Map message) {
-    scannedDirectoryCount =
-        message['scannedDirectoryCount'] ?? scannedDirectoryCount;
-    scannedGalleryCount = message['scannedGalleryCount'] ?? scannedGalleryCount;
-    totalDirectoryCount = message['totalDirectoryCount'] ?? totalDirectoryCount;
-    scanningPath = message['scanningPath'];
-    update([galleryCountChangedId]);
-  }
-
   void _handleScanDone(
-      Map message, int preCount, DateTime start, Completer<void> completer) {
-    allGalleries = ((message['allGallerys'] as List?) ?? [])
-        .whereType<Map>()
-        .map((gallery) =>
-            LocalGallery.fromScanMessage(gallery.cast<String, dynamic>()))
+      _LocalGalleryScanContext context, int preCount, DateTime start, Completer<void> completer) {
+    allGalleries = context.allGallerys
+        .map((gallery) => LocalGallery.fromScanMessage(gallery))
         .toList();
 
     path2GalleryDir = {};
-    ((message['path2GalleryDir'] as Map?) ?? {})
-        .forEach((dynamic key, dynamic value) {
-      path2GalleryDir[key as String] = ((value as List?) ?? [])
-          .whereType<Map>()
-          .map((gallery) =>
-              LocalGallery.fromScanMessage(gallery.cast<String, dynamic>()))
+    context.path2GalleryDir.forEach((key, value) {
+      path2GalleryDir[key] = value
+          .map((gallery) => LocalGallery.fromScanMessage(gallery))
           .toList();
     });
 
     path2SubDir = {};
-    ((message['path2SubDir'] as Map?) ?? {})
-        .forEach((dynamic key, dynamic value) {
-      path2SubDir[key as String] = ((value as List?) ?? []).cast<String>();
+    context.path2SubDir.forEach((key, value) {
+      path2SubDir[key] = List<String>.from(value);
     });
 
-    scannedDirectoryCount =
-        message['scannedDirectoryCount'] ?? scannedDirectoryCount;
-    totalDirectoryCount = message['totalDirectoryCount'] ?? totalDirectoryCount;
+    scannedDirectoryCount = context.scannedDirectoryCount;
+    totalDirectoryCount = context.totalDirectoryCount;
     scannedGalleryCount = allGalleries.length;
     scanningPath = null;
     loadingState = LoadingState.success;
     _hasScanned = true;
     _refreshTask = null;
-    _disposeScanner();
 
     log.info(
       'Refresh local galleries, preCount:$preCount, newCount: ${allGalleries.length}, timeCost: ${DateTime.now().difference(start).inMilliseconds}ms',
@@ -249,7 +220,9 @@ class LocalGalleryService extends GetxController
       toast('scanCompleted'.tr);
     }
 
-    completer.complete();
+    if (!completer.isCompleted) {
+      completer.complete();
+    }
   }
 
   void _handleScanError(
@@ -261,25 +234,11 @@ class LocalGalleryService extends GetxController
     loadingState = LoadingState.error;
     scanningPath = null;
     _refreshTask = null;
-    _disposeScanner();
     update([galleryCountChangedId]);
 
     if (!completer.isCompleted) {
       completer.complete();
     }
-  }
-
-  void _disposeScanner() {
-    _scanReceivePort?.close();
-    _scanReceivePort = null;
-    _scanIsolate = null;
-  }
-
-  @override
-  void onClose() {
-    _scanReceivePort?.close();
-    _scanIsolate?.kill(priority: Isolate.immediate);
-    super.onClose();
   }
 }
 
@@ -311,14 +270,9 @@ class LocalGalleryParseResult {
   bool isLegalNestedGalleryDir = false;
 }
 
-class _LocalGalleryScanMessageType {
-  static const String progress = 'progress';
-  static const String done = 'done';
-  static const String error = 'error';
-}
-
 class _LocalGalleryScanContext {
-  final SendPort sendPort;
+  final void Function(String scanningPath, int scannedDirectoryCount,
+      int scannedGalleryCount, int totalDirectoryCount) onProgress;
   final String visibleDirPath;
   final List<Map<String, String>> allGallerys = [];
   final Map<String, List<Map<String, String>>> path2GalleryDir = {};
@@ -330,7 +284,7 @@ class _LocalGalleryScanContext {
   DateTime lastProgressTime = DateTime.fromMillisecondsSinceEpoch(0);
 
   _LocalGalleryScanContext(
-      {required this.sendPort, required this.visibleDirPath});
+      {required this.onProgress, required this.visibleDirPath});
 
   void sendProgress(String scanningPath, {bool force = false}) {
     DateTime now = DateTime.now();
@@ -339,13 +293,12 @@ class _LocalGalleryScanContext {
     }
 
     lastProgressTime = now;
-    sendPort.send({
-      'type': _LocalGalleryScanMessageType.progress,
-      'scannedDirectoryCount': scannedDirectoryCount,
-      'scannedGalleryCount': scannedGalleryCount,
-      'totalDirectoryCount': totalDirectoryCount,
-      'scanningPath': scanningPath,
-    });
+    onProgress(
+      scanningPath,
+      scannedDirectoryCount,
+      scannedGalleryCount,
+      totalDirectoryCount,
+    );
   }
 }
 
@@ -354,50 +307,7 @@ class _LocalGalleryDirectoryScanResult {
   bool isLegalNestedGalleryDir = false;
 }
 
-void _scanLocalGalleriesInIsolate(Map<String, dynamic> args) {
-  SendPort sendPort = args['sendPort'];
-  List<String> scanPaths = (args['scanPaths'] as List).cast<String>();
-  String visibleDirPath = args['visibleDirPath'];
-  // ignore: avoid_print
-  print('[local-gallery-scanner] isolate started, scanPaths=$scanPaths, visibleDirPath=$visibleDirPath');
-  _LocalGalleryScanContext context = _LocalGalleryScanContext(
-      sendPort: sendPort, visibleDirPath: visibleDirPath);
-
-  try {
-    context.totalDirectoryCount = _countDirectoriesInIsolate(scanPaths);
-    // ignore: avoid_print
-    print('[local-gallery-scanner] counted ${context.totalDirectoryCount} directories');
-    context.sendProgress('counting-done', force: true);
-
-    for (String scanPath in scanPaths) {
-      // ignore: avoid_print
-      print('[local-gallery-scanner] scanning $scanPath');
-      _parseLocalGalleryDirectoryInIsolate(context, Directory(scanPath), true);
-    }
-
-    _sortLocalGalleryScanResult(context);
-    // ignore: avoid_print
-    print('[local-gallery-scanner] done, found ${context.allGallerys.length} galleries');
-    sendPort.send({
-      'type': _LocalGalleryScanMessageType.done,
-      'allGallerys': context.allGallerys,
-      'path2GalleryDir': context.path2GalleryDir,
-      'path2SubDir': context.path2SubDir,
-      'scannedDirectoryCount': context.scannedDirectoryCount,
-      'totalDirectoryCount': context.totalDirectoryCount,
-    });
-  } catch (e, stackTrace) {
-    // ignore: avoid_print
-    print('[local-gallery-scanner] error: $e\n$stackTrace');
-    sendPort.send({
-      'type': _LocalGalleryScanMessageType.error,
-      'error': e.toString(),
-      'stackTrace': stackTrace.toString(),
-    });
-  }
-}
-
-int _countDirectoriesInIsolate(List<String> scanPaths) {
+int _countDirectories(List<String> scanPaths) {
   int count = 0;
   for (String scanPath in scanPaths) {
     count += _countDirectoriesRecursive(Directory(scanPath));
@@ -429,7 +339,7 @@ int _countDirectoriesRecursive(Directory directory) {
   return count;
 }
 
-_LocalGalleryDirectoryScanResult _parseLocalGalleryDirectoryInIsolate(
+_LocalGalleryDirectoryScanResult _parseLocalGalleryDirectory(
     _LocalGalleryScanContext context, Directory directory, bool isRootDir) {
   _LocalGalleryDirectoryScanResult result = _LocalGalleryDirectoryScanResult();
   context.scannedDirectoryCount++;
@@ -465,7 +375,7 @@ _LocalGalleryDirectoryScanResult _parseLocalGalleryDirectoryInIsolate(
 
   for (Directory subDirectory in subDirectories) {
     _LocalGalleryDirectoryScanResult subResult =
-        _parseLocalGalleryDirectoryInIsolate(context, subDirectory, false);
+        _parseLocalGalleryDirectory(context, subDirectory, false);
     if (subResult.isLegalGalleryDir || subResult.isLegalNestedGalleryDir) {
       result.isLegalNestedGalleryDir = true;
       List<String> subDirs = context.path2SubDir[parentPath] ??= [];
@@ -477,14 +387,14 @@ _LocalGalleryDirectoryScanResult _parseLocalGalleryDirectoryInIsolate(
 
   if (result.isLegalGalleryDir) {
     images.sort(FileUtil.naturalCompareFile);
-    _initLocalGalleryInfoInIsolate(
+    _initLocalGalleryInfo(
         context, directory, images.first, parentPath);
   }
 
   return result;
 }
 
-void _initLocalGalleryInfoInIsolate(_LocalGalleryScanContext context,
+void _initLocalGalleryInfo(_LocalGalleryScanContext context,
     Directory galleryDir, File coverImage, String parentPath) {
   Map<String, String> gallery = {
     'title': basename(galleryDir.path),

@@ -151,9 +151,10 @@ class GalleryDownloadService extends GetxController with GridBasePageServiceMixi
       },
     );
 
-    if (downloadSetting.restoreTasksAutomatically.isTrue) {
-      restoreTasks();
-    }
+    /// Restore is deferred to first entry of the download page via
+    /// [ensureRestored], matching upstream behavior. Running it at startup
+    /// blocks app launch when the download directory is large (thousands
+    /// of galleries). See [ensureRestored] / [download_base_page.dart].
   }
 
   @override
@@ -186,6 +187,52 @@ class GalleryDownloadService extends GetxController with GridBasePageServiceMixi
     await _startDownloadTask(galleryDownloadInfos[gallery.gid]!);
 
     log.info('Begin to download gallery: ${gallery.title}, original: ${gallery.downloadOriginalImage}');
+
+    /// If the caller didn't supply [oldVersionGalleryUrl] (i.e. this isn't an
+    /// "Update gallery" action), fetch the parent gallery URL from the EH
+    /// detail page so the "Delete history versions" feature can discover
+    /// version relationships without a network deep-scan.
+    if (gallery.oldVersionGalleryUrl == null) {
+      _fetchAndSetOldVersionGalleryUrl(gallery).catchError((e, st) {
+        log.warning('Failed to fetch parentGalleryUrl for ${gallery.gid}', e, st);
+      });
+    }
+  }
+
+  /// Fetch the gallery's detail page and persist [oldVersionGalleryUrl] if
+  /// the page exposes a parent gallery link. Runs in the background —
+  /// callers don't await it so download start isn't delayed.
+  Future<void> _fetchAndSetOldVersionGalleryUrl(GalleryDownloadedData gallery) async {
+    final ({GalleryDetail galleryDetails, String apikey}) result = await retry(
+      () => ehRequest.requestDetailPage(
+        galleryUrl: gallery.galleryUrl,
+        useCacheIfAvailable: true,
+        parser: EHSpiderParser.detailPage2GalleryAndDetailAndApikey,
+      ),
+      retryIf: (e) => e is DioException,
+      maxAttempts: 3,
+    );
+    final String? parentUrl = result.galleryDetails.parentGalleryUrl?.url;
+    if (parentUrl == null || parentUrl.isEmpty) {
+      return;
+    }
+    await updateOldVersionGalleryUrl(gallery.gid, parentUrl);
+    log.info('Fetched oldVersionGalleryUrl=$parentUrl for gallery ${gallery.gid}');
+  }
+
+  /// Public API for backfilling [oldVersionGalleryUrl] on an already-downloaded
+  /// gallery. Updates the DB row, the in-memory [GalleryDownloadInfo], and the
+  /// on-disk metadata file. Used by the batch-fetch dialog and by
+  /// [_fetchAndSetOldVersionGalleryUrl] on fresh downloads.
+  Future<void> updateOldVersionGalleryUrl(int gid, String parentUrl) async {
+    await _updateGalleryInDatabase(
+      GalleryDownloadedCompanion(gid: Value(gid), oldVersionGalleryUrl: Value(parentUrl)),
+    );
+    final GalleryDownloadInfo? info = galleryDownloadInfos[gid];
+    if (info != null) {
+      info.oldVersionGalleryUrl = parentUrl;
+      _saveGalleryMetadataInDisk(info);
+    }
   }
 
   Future<void> _startDownloadTask(GalleryDownloadInfo info) async {
@@ -775,6 +822,22 @@ class GalleryDownloadService extends GetxController with GridBasePageServiceMixi
   /// Whether a [restoreTasks] pass is currently in flight.
   bool get isRestoring => _restoreTasksFuture != null;
 
+  /// Restore progress for UI display. Updated during [_doRestoreTasks].
+  int restoreTotalDirectories = 0;
+  int restoreScannedDirectories = 0;
+  int restoreParsedMetadata = 0;
+  int restoreRestoredGalleries = 0;
+
+  /// Current restore phase for UI display.
+  /// 0 = idle/done, 1 = parsing metadata, 2 = restoring to DB/memory.
+  int restorePhase = 0;
+
+  /// When true, [_buildGalleryInfoInMemory] skips the per-gallery
+  /// [update] call so batch restores don't trigger 3000+ UI rebuilds.
+  /// The caller (e.g. [_doRestoreTasks]) is responsible for calling
+  /// [update] at appropriate intervals and once at the end.
+  bool _batchRestoreMode = false;
+
   /// Trigger restore when entering the download page, regardless of
   /// [downloadSetting.restoreTasksAutomatically]. Safe to call multiple
   /// times — [restoreTasks] coalesces concurrent triggers.
@@ -803,6 +866,11 @@ class GalleryDownloadService extends GetxController with GridBasePageServiceMixi
       return result;
     } finally {
       _restoreTasksFuture = null;
+      restoreTotalDirectories = 0;
+      restoreScannedDirectories = 0;
+      restoreParsedMetadata = 0;
+      restoreRestoredGalleries = 0;
+      restorePhase = 0;
       update([galleryCountChangedId]);
     }
   }
@@ -818,35 +886,78 @@ class GalleryDownloadService extends GetxController with GridBasePageServiceMixi
       return 0;
     }
 
-    final List<String> galleryDirPaths = downloadDir.listSync().whereType<io.Directory>().map((d) => d.path).toList();
-    log.info('_doRestoreTasks: found ${galleryDirPaths.length} gallery directories');
-    if (galleryDirPaths.isEmpty) {
+    /// Use async listing so the UI thread isn't blocked during enumeration
+    /// of directories containing thousands of entries.
+    final List<io.Directory> galleryDirs = <io.Directory>[];
+    await for (final entity in downloadDir.list()) {
+      if (entity is io.Directory) {
+        galleryDirs.add(entity);
+      }
+    }
+    restoreTotalDirectories = galleryDirs.length;
+    restoreScannedDirectories = 0;
+    restoreParsedMetadata = 0;
+    restoreRestoredGalleries = 0;
+    restorePhase = 1;
+    log.info('_doRestoreTasks: found ${galleryDirs.length} gallery directories');
+    update([galleryCountChangedId]);
+    if (galleryDirs.isEmpty) {
+      restorePhase = 0;
       return 0;
     }
 
-    /// Parse metadata files. We avoid [Isolate.run] here because the worker
+    /// Skip metadata parsing for galleries already loaded from the DB.
+    /// Directory name format is `'{gid} - {title}'` (see [DownloadPathResolver]),
+    /// so we extract the leading numeric gid and check [galleryDownloadInfos].
+    /// On a typical re-launch with 3000+ DB-loaded galleries, this avoids
+    /// reading + parsing 3000+ metadata files only to discard every result.
+    int skippedAlreadyLoaded = 0;
+    final List<io.Directory> dirsToParse = [];
+    for (final io.Directory dir in galleryDirs) {
+      final int? gidFromName = _tryExtractGidFromDirName(dir.path);
+      if (gidFromName != null && galleryDownloadInfos.containsKey(gidFromName)) {
+        skippedAlreadyLoaded++;
+        continue;
+      }
+      dirsToParse.add(dir);
+    }
+    log.info('_doRestoreTasks: skipped $skippedAlreadyLoaded already-loaded, parsing ${dirsToParse.length} metadata files');
+    update([galleryCountChangedId]);
+
+    /// Parse metadata files using async I/O so the UI thread stays free to
+    /// rebuild and show progress. We avoided [Isolate.run] because the worker
     /// isolate would need to initialise every global top-level variable in
     /// the library (downloadSetting, pathService, galleryDownloadService,
-    /// etc.), some of which have constructors that depend on GetX /
-    /// platform channels not available in a spawned isolate. This caused
-    /// the isolate to hang silently, stalling the restore forever.
+    /// etc.), some of which depend on GetX / platform channels not available
+    /// in a spawned isolate — this caused the isolate to hang silently.
     ///
-    /// Instead, parse synchronously but yield to the event loop every 20
-    /// galleries so the UI stays responsive.
+    /// Each iteration yields to the event loop (the [await] on file I/O is
+    /// sufficient), so progress updates render between reads. A dedicated
+    /// [update] call every gallery keeps the UI fresh.
     final List<({GalleryDownloadedData gallery, List<GalleryImage?> images})?> restoredList = [];
-    for (int i = 0; i < galleryDirPaths.length; i++) {
+    for (int i = 0; i < dirsToParse.length; i++) {
       try {
-        restoredList.add(_GalleryMetadataStore.readForRestore(io.Directory(galleryDirPaths[i]), downloadPath, visibleDirPath));
-      } catch (e, st) {
-        log.warning('_doRestoreTasks: failed to parse metadata for ${galleryDirPaths[i]}: $e');
+        restoredList.add(await _GalleryMetadataStore.readForRestoreAsync(dirsToParse[i], downloadPath, visibleDirPath));
+      } catch (e) {
+        log.warning('_doRestoreTasks: failed to parse metadata for ${dirsToParse[i].path}: $e');
         restoredList.add(null);
       }
-      if (i % 20 == 19) {
-        await Future.delayed(Duration.zero);
+      restoreScannedDirectories++;
+      restoreParsedMetadata = restoredList.whereType<Object>().length;
+      if (i % 10 == 0) {
+        update([galleryCountChangedId]);
       }
+      /// Yield to the event loop so UI rebuilds land.
+      await Future.delayed(Duration.zero);
     }
-    log.info('_doRestoreTasks: parsed ${restoredList.whereType<Object>().length}/${galleryDirPaths.length} metadata files');
+    log.info('_doRestoreTasks: parsed ${restoredList.whereType<Object>().length}/${dirsToParse.length} metadata files');
+    restorePhase = 2;
+    update([galleryCountChangedId]);
 
+    /// Batch mode: suppress per-gallery [update] calls inside
+    /// [_buildGalleryInfoInMemory] so 3000+ restores don't trigger 3000+
+    /// UI rebuilds. We call [update] at intervals and once at the end.
+    _batchRestoreMode = true;
     int restoredCount = 0;
     for (final ({GalleryDownloadedData gallery, List<GalleryImage?> images})? restored in restoredList) {
       if (restored == null) {
@@ -899,9 +1010,32 @@ class GalleryDownloadService extends GetxController with GridBasePageServiceMixi
       }
 
       restoredCount++;
+      restoreRestoredGalleries = restoredCount;
+      if (restoredCount % 50 == 0) {
+        update([galleryCountChangedId]);
+        await Future.delayed(Duration.zero);
+      }
     }
+    _batchRestoreMode = false;
+    _invalidateGalleriesCache();
+    restorePhase = 0;
+    update([galleryCountChangedId]);
 
     return restoredCount;
+  }
+
+  /// Extract the leading numeric gid from a gallery directory name shaped
+  /// `'{gid} - {title}'` (see [DownloadPathResolver.computeGalleryDownloadAbsolutePath]).
+  /// Returns null if the name doesn't start with a parseable integer followed
+  /// by ` - `. Used by [_doRestoreTasks] to skip metadata parsing for
+  /// galleries already resident in [galleryDownloadInfos] from the DB load.
+  static int? _tryExtractGidFromDirName(String dirPath) {
+    final String name = path.basename(dirPath);
+    final int sep = name.indexOf(' - ');
+    if (sep <= 0) {
+      return null;
+    }
+    return int.tryParse(name.substring(0, sep));
   }
 
   /// Re-compute every image's on-disk path after the user changes the download
@@ -1342,7 +1476,9 @@ class GalleryDownloadService extends GetxController with GridBasePageServiceMixi
     );
 
     _invalidateGalleriesCache();
-    update([galleryCountChangedId, '$galleryDownloadProgressId::${gallery.gid}']);
+    if (!_batchRestoreMode) {
+      update([galleryCountChangedId, '$galleryDownloadProgressId::${gallery.gid}']);
+    }
   }
 
   void _clearGalleryInfoInMemory(GalleryDownloadInfo gallery) {
@@ -1589,7 +1725,10 @@ class GalleryDownloadInfo implements Comparable<GalleryDownloadInfo> {
   final String? uploader;
   final String publishTime;
   final String insertTime;
-  final String? oldVersionGalleryUrl;
+
+  /// Mutable so [_fetchAndSetOldVersionGalleryUrl] can backfill it from the
+  /// network after download start. Persisted to DB + metadata on update.
+  String? oldVersionGalleryUrl;
   final String? sanitizedTitle;
 
   /// Pre-parsed `MMddHHmmss` of [insertTime]. Cached at construction so
@@ -1788,7 +1927,6 @@ class GalleryDownloadInfo implements Comparable<GalleryDownloadInfo> {
       log.debug('evictImages skipped on gallery $gid: ${_imageResidents.length} owner(s) still retaining: ${_ownersSnapshot()}');
       return;
     }
-    log.debug('evictImages on gallery $gid');
     images = null;
   }
 

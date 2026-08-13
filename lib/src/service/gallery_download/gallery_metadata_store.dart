@@ -122,6 +122,10 @@ class _GalleryMetadataStore {
   /// is safe to call inside a worker isolate via [Isolate.run] — the global
   /// [downloadSetting] / [pathService] singletons are NOT initialised in a
   /// spawned isolate, so accessing them would throw [LateInitializationError].
+  ///
+  /// Prefer [readForRestoreAsync] from the main isolate — it uses async file
+  /// I/O and keeps the UI responsive. This sync variant is retained for
+  /// isolate-based callers (if re-introduced) and as a reference impl.
   static ({GalleryDownloadedData gallery, List<GalleryImage?> images})? readForRestore(
     io.Directory galleryDir,
     String downloadPath,
@@ -131,43 +135,7 @@ class _GalleryMetadataStore {
     if (raw == null) {
       return null;
     }
-
-    GalleryDownloadedData gallery = GalleryDownloadedData.fromJson(raw['gallery']);
-
-    /// Back-fill sanitizedTitle for metadata files written before this field was introduced.
-    if (gallery.sanitizedTitle == null) {
-      final int reservedBytes = utf8.encode('${gallery.gid} - ').length;
-      gallery = gallery.copyWith(
-        sanitizedTitle: Value(DownloadPathResolver.computeSanitizedGalleryTitle(gallery.title, reservedBytes)),
-      );
-    }
-
-    List<GalleryImage?> images = (jsonDecode(raw['images']) as List).map((_map) => _map == null ? null : GalleryImage.fromJson(_map)).toList();
-
-    /// To deal with changed download location, compute download path again.
-    for (int serialNo = 0; serialNo < images.length; serialNo++) {
-      if (images[serialNo] == null) {
-        continue;
-      }
-      images[serialNo]!.path = DownloadPathResolver.computeImageDownloadRelativePathWith(
-        downloadPath,
-        visibleDirPath,
-        gallery,
-        _downloadUrlFor(gallery, images[serialNo]!),
-        serialNo,
-      );
-      images[serialNo]!.imageHash ??= '';
-    }
-
-    /// For some reason, downloaded status is not updated correctly, check it again
-    if (gallery.downloadStatusIndex != DownloadStatus.downloaded.index) {
-      int downloadedImageCount = images.fold(0, (total, image) => total + (image?.downloadStatus == DownloadStatus.downloaded ? 1 : 0));
-      if (downloadedImageCount == gallery.pageCount) {
-        gallery = gallery.copyWith(downloadStatusIndex: DownloadStatus.downloaded.index);
-      }
-    }
-
-    return (gallery: gallery, images: images);
+    return _buildRestoredRecord(raw, downloadPath, visibleDirPath);
   }
 
   /// Read + parse the metadata file in [galleryDir]. Returns null if the file
@@ -211,5 +179,102 @@ class _GalleryMetadataStore {
       log.error('Read gallery metadata failed: ${metadataFile.path}', e, st);
       return null;
     }
+  }
+
+  /// Async variant of [readForRestore] using async file I/O to avoid blocking
+  /// the UI thread. Yields between file reads so progress updates render.
+  static Future<({GalleryDownloadedData gallery, List<GalleryImage?> images})?> readForRestoreAsync(
+    io.Directory galleryDir,
+    String downloadPath,
+    String visibleDirPath,
+  ) async {
+    final Map<String, dynamic>? raw = await _readAsync(galleryDir);
+    if (raw == null) {
+      return null;
+    }
+    return _buildRestoredRecord(raw, downloadPath, visibleDirPath);
+  }
+
+  /// Async variant of [read] — uses [File.exists] / [File.readAsString] so the
+  /// event loop stays free to process UI rebuilds between file reads.
+  static Future<Map<String, dynamic>?> _readAsync(io.Directory galleryDir) async {
+    io.File metadataFile = io.File(path.join(galleryDir.path, metadataFileName));
+    if (!await metadataFile.exists()) {
+      return null;
+    }
+
+    try {
+      final String contents = await metadataFile.readAsString();
+      Map metadata = jsonDecode(contents);
+
+      (metadata['gallery'] as Map).putIfAbsent('downloadOriginalImage', () => false);
+      (metadata['gallery'] as Map).putIfAbsent('sortOrder', () => 0);
+      if ((metadata['gallery'] as Map)['insertTime'] == null) {
+        (metadata['gallery'] as Map)['insertTime'] = DateTime.now().toString();
+      }
+      if ((metadata['gallery'] as Map)['priority'] == null) {
+        (metadata['gallery'] as Map)['priority'] = GalleryDownloadService.defaultDownloadGalleryPriority;
+      }
+      if ((metadata['gallery'] as Map)['groupName'] == null) {
+        (metadata['gallery'] as Map)['groupName'] = 'default';
+      }
+      if (metadata['tags'] == null) {
+        (metadata['gallery'] as Map)['tags'] = '';
+      }
+      if (metadata['tagRefreshTime'] == null) {
+        (metadata['gallery'] as Map)['tagRefreshTime'] = DateTime.now().toString();
+      }
+
+      return {
+        'gallery': metadata['gallery'],
+        'images': metadata['images'],
+      };
+    } catch (e, st) {
+      log.error('Read gallery metadata failed: ${metadataFile.path}', e, st);
+      return null;
+    }
+  }
+
+  /// Shared record-building logic for sync [readForRestore] and
+  /// [readForRestoreAsync]. Takes the already-parsed [raw] map and applies
+  /// compatibility back-fills.
+  static ({GalleryDownloadedData gallery, List<GalleryImage?> images})? _buildRestoredRecord(
+    Map<String, dynamic> raw,
+    String downloadPath,
+    String visibleDirPath,
+  ) {
+    GalleryDownloadedData gallery = GalleryDownloadedData.fromJson(raw['gallery']);
+
+    if (gallery.sanitizedTitle == null) {
+      final int reservedBytes = utf8.encode('${gallery.gid} - ').length;
+      gallery = gallery.copyWith(
+        sanitizedTitle: Value(DownloadPathResolver.computeSanitizedGalleryTitle(gallery.title, reservedBytes)),
+      );
+    }
+
+    List<GalleryImage?> images = (jsonDecode(raw['images']) as List).map((_map) => _map == null ? null : GalleryImage.fromJson(_map)).toList();
+
+    for (int serialNo = 0; serialNo < images.length; serialNo++) {
+      if (images[serialNo] == null) {
+        continue;
+      }
+      images[serialNo]!.path = DownloadPathResolver.computeImageDownloadRelativePathWith(
+        downloadPath,
+        visibleDirPath,
+        gallery,
+        _downloadUrlFor(gallery, images[serialNo]!),
+        serialNo,
+      );
+      images[serialNo]!.imageHash ??= '';
+    }
+
+    if (gallery.downloadStatusIndex != DownloadStatus.downloaded.index) {
+      int downloadedImageCount = images.fold(0, (total, image) => total + (image?.downloadStatus == DownloadStatus.downloaded ? 1 : 0));
+      if (downloadedImageCount == gallery.pageCount) {
+        gallery = gallery.copyWith(downloadStatusIndex: DownloadStatus.downloaded.index);
+      }
+    }
+
+    return (gallery: gallery, images: images);
   }
 }

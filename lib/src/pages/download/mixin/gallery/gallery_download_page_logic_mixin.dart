@@ -6,6 +6,7 @@ import 'package:jhentai/src/mixin/scroll_to_top_logic_mixin.dart';
 import 'package:jhentai/src/mixin/update_global_gallery_status_logic_mixin.dart';
 import 'package:jhentai/src/service/super_resolution_service.dart';
 import 'package:jhentai/src/setting/super_resolution_setting.dart';
+import 'package:jhentai/src/widget/eh_fetch_old_version_urls_dialog.dart';
 
 import '../../../../model/read_page_info.dart';
 import '../../../../routes/routes.dart';
@@ -234,6 +235,10 @@ mixin GalleryDownloadPageLogicMixin on GetxController
         EHContextMenuAction(
           text: 'deleteHistoryVersions'.tr,
           onTap: handleDeleteHistoryVersions,
+        ),
+        EHContextMenuAction(
+          text: 'fetchOldVersionUrls'.tr,
+          onTap: () => Get.dialog(const EHFetchOldVersionUrlsDialog()),
         ),
         EHContextMenuAction(
           text: 'deleteTask'.tr,

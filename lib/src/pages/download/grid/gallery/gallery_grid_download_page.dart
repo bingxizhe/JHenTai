@@ -14,6 +14,7 @@ import 'package:jhentai/src/pages/download/mixin/gallery/gallery_download_page_s
 import 'package:jhentai/src/routes/routes.dart';
 import 'package:jhentai/src/service/super_resolution_service.dart';
 import 'package:jhentai/src/utils/route_util.dart';
+import 'package:jhentai/src/widget/eh_fetch_old_version_urls_dialog.dart';
 import 'package:loading_animation_widget/loading_animation_widget.dart';
 
 import '../../../../config/ui_config.dart';
@@ -104,6 +105,13 @@ class GalleryGridDownloadPage extends StatelessWidget with Scroll2TopPageMixin, 
                 children: [const Icon(Icons.history), const SizedBox(width: 12), Text('deleteHistoryVersions'.tr)],
               ),
             ),
+            PopupMenuItem(
+              value: 6,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [const Icon(Icons.link), const SizedBox(width: 12), Text('fetchOldVersionUrls'.tr)],
+              ),
+            ),
           ];
         },
         onSelected: (value) {
@@ -127,6 +135,9 @@ class GalleryGridDownloadPage extends StatelessWidget with Scroll2TopPageMixin, 
           }
           if (value == 5) {
             logic.handleDeleteHistoryVersions();
+          }
+          if (value == 6) {
+            Get.dialog(const EHFetchOldVersionUrlsDialog());
           }
         },
       ),

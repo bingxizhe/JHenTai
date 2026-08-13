@@ -248,7 +248,21 @@ class _LocalGalleryScanProgressBanner extends StatelessWidget {
     String progressText;
 
     if (preferDownload) {
-      progressText = '${'scanningLocalGallerys'.tr}...';
+      if (galleryDownloadService.restorePhase == 1 && galleryDownloadService.restoreTotalDirectories > 0) {
+        progressText = 'parsingMetadataProgress'.tr
+            .replaceAll('{count}', galleryDownloadService.restoreScannedDirectories.toString())
+            .replaceAll('{total}', galleryDownloadService.restoreTotalDirectories.toString());
+      } else if (galleryDownloadService.restorePhase == 2 && galleryDownloadService.restoreParsedMetadata > 0) {
+        progressText = 'loadingGalleriesProgress'.tr
+            .replaceAll('{count}', galleryDownloadService.restoreRestoredGalleries.toString())
+            .replaceAll('{total}', galleryDownloadService.restoreParsedMetadata.toString());
+      } else if (galleryDownloadService.restoreTotalDirectories > 0) {
+        progressText = 'restoringGalleriesProgress'.tr
+            .replaceAll('{count}', galleryDownloadService.restoreScannedDirectories.toString())
+            .replaceAll('{total}', galleryDownloadService.restoreTotalDirectories.toString());
+      } else {
+        progressText = 'restoringGalleries'.tr;
+      }
     } else if (localGalleryService.totalDirectoryCount > 0) {
       progressText = '${'scanningLocalGallerys'.tr} '
           '${localGalleryService.scannedDirectoryCount}/'
