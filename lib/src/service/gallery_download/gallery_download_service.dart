@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:core';
 import 'dart:io' as io;
-import 'dart:isolate';
 
 import 'package:collection/collection.dart';
 import 'package:dio/dio.dart';
@@ -130,13 +129,20 @@ class GalleryDownloadService extends GetxController with GridBasePageServiceMixi
   Future<void> doInitBean() async {
     Get.put(this, permanent: true);
 
-    await _instantiateFromDB();
-
-    log.debug('Gallery download task count: ${galleries.length}');
+    try {
+      await _instantiateFromDB();
+      log.debug('Gallery download task count: ${galleries.length}');
+    } catch (e, st) {
+      log.error('Failed to instantiate galleries from DB', e, st);
+    } finally {
+      /// Ensure [completed] is always resolved so [restoreTasks] never hangs
+      /// at `await completed` even if DB initialisation fails.
+      if (!_completer.isCompleted) {
+        _completer.complete(true);
+      }
+    }
 
     _startExecutor();
-
-    _completer.complete(true);
 
     _downloadSettingListener = everAll(
       [downloadSetting.downloadTaskConcurrency, downloadSetting.maximum, downloadSetting.period],
@@ -809,24 +815,26 @@ class GalleryDownloadService extends GetxController with GridBasePageServiceMixi
       return 0;
     }
 
-    /// Parse all metadata files in a single background isolate. Each parse
-    /// is pure (static [_GalleryMetadataStore.readForRestore]); only primitive
-    /// paths cross the isolate boundary.
+    /// Parse metadata files. We avoid [Isolate.run] here because the worker
+    /// isolate would need to initialise every global top-level variable in
+    /// the library (downloadSetting, pathService, galleryDownloadService,
+    /// etc.), some of which have constructors that depend on GetX /
+    /// platform channels not available in a spawned isolate. This caused
+    /// the isolate to hang silently, stalling the restore forever.
     ///
-    /// [downloadPath] and [visibleDirPath] are captured from the main isolate
-    /// and passed to [readForRestore] because the global [downloadSetting] /
-    /// [pathService] singletons are NOT initialised inside a worker isolate.
-    final List<({GalleryDownloadedData gallery, List<GalleryImage?> images})?> restoredList = await Isolate.run(() {
-      return galleryDirPaths.map((p) {
-        try {
-          return _GalleryMetadataStore.readForRestore(io.Directory(p), downloadPath, visibleDirPath);
-        } catch (e, st) {
-          // Logging from a worker isolate may not reach file handlers; swallow
-          // here so one bad metadata file doesn't abort the whole restore.
-          return null;
-        }
-      }).toList();
-    });
+    /// Instead, parse synchronously but yield to the event loop every 20
+    /// galleries so the UI stays responsive.
+    final List<({GalleryDownloadedData gallery, List<GalleryImage?> images})?> restoredList = [];
+    for (int i = 0; i < galleryDirPaths.length; i++) {
+      try {
+        restoredList.add(_GalleryMetadataStore.readForRestore(io.Directory(galleryDirPaths[i]), downloadPath, visibleDirPath));
+      } catch (e, st) {
+        restoredList.add(null);
+      }
+      if (i % 20 == 19) {
+        await Future.delayed(Duration.zero);
+      }
+    }
 
     int restoredCount = 0;
     for (final ({GalleryDownloadedData gallery, List<GalleryImage?> images})? restored in restoredList) {
