@@ -7,7 +7,6 @@ import 'package:jhentai/src/mixin/update_global_gallery_status_logic_mixin.dart'
 import 'package:jhentai/src/service/super_resolution_service.dart';
 import 'package:jhentai/src/setting/super_resolution_setting.dart';
 
-import '../../../../database/database.dart';
 import '../../../../model/read_page_info.dart';
 import '../../../../routes/routes.dart';
 import '../../../../service/gallery_download/download_path_resolver.dart';

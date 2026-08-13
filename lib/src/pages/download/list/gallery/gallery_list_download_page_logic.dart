@@ -7,7 +7,6 @@ import 'package:jhentai/src/extension/get_logic_extension.dart';
 import 'package:jhentai/src/pages/download/mixin/gallery/gallery_download_page_logic_mixin.dart';
 import 'package:jhentai/src/setting/performance_setting.dart';
 
-import '../../../../database/database.dart';
 import '../../../../mixin/scroll_to_top_logic_mixin.dart';
 import '../../../../mixin/scroll_to_top_state_mixin.dart';
 import '../../../../mixin/update_global_gallery_status_logic_mixin.dart';

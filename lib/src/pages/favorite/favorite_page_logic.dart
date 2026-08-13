@@ -15,7 +15,6 @@ import 'package:jhentai/src/utils/toast_util.dart';
 import 'package:jhentai/src/widget/eh_download_dialog.dart';
 import 'package:jhentai/src/widget/eh_favorite_sort_order_dialog.dart';
 
-import '../../database/database.dart';
 import '../../enum/config_enum.dart';
 import '../../exception/eh_site_exception.dart';
 import '../../model/gallery.dart';
