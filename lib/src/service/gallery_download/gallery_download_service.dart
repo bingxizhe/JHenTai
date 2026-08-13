@@ -796,7 +796,10 @@ class GalleryDownloadService extends GetxController with GridBasePageServiceMixi
   }
 
   Future<int> _doRestoreTasks() async {
-    io.Directory downloadDir = io.Directory(downloadSetting.downloadPath.value);
+    final String downloadPath = downloadSetting.downloadPath.value;
+    final String visibleDirPath = pathService.getVisibleDir().path;
+
+    io.Directory downloadDir = io.Directory(downloadPath);
     if (!downloadDir.existsSync()) {
       return 0;
     }
@@ -809,10 +812,14 @@ class GalleryDownloadService extends GetxController with GridBasePageServiceMixi
     /// Parse all metadata files in a single background isolate. Each parse
     /// is pure (static [_GalleryMetadataStore.readForRestore]); only primitive
     /// paths cross the isolate boundary.
+    ///
+    /// [downloadPath] and [visibleDirPath] are captured from the main isolate
+    /// and passed to [readForRestore] because the global [downloadSetting] /
+    /// [pathService] singletons are NOT initialised inside a worker isolate.
     final List<({GalleryDownloadedData gallery, List<GalleryImage?> images})?> restoredList = await Isolate.run(() {
       return galleryDirPaths.map((p) {
         try {
-          return _GalleryMetadataStore.readForRestore(io.Directory(p));
+          return _GalleryMetadataStore.readForRestore(io.Directory(p), downloadPath, visibleDirPath);
         } catch (e, st) {
           // Logging from a worker isolate may not reach file handlers; swallow
           // here so one bad metadata file doesn't abort the whole restore.

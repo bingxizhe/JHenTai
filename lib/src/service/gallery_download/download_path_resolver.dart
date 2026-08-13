@@ -46,6 +46,33 @@ class DownloadPathResolver {
     );
   }
 
+  /// Isolate-safe variants that accept [downloadPath] and [visibleDirPath]
+  /// explicitly, instead of reading the [downloadSetting] / [pathService]
+  /// global singletons (which are not initialised inside a worker isolate
+  /// spawned via [Isolate.run]).
+  static String computeImageDownloadAbsolutePathWith(
+    String downloadPath,
+    GalleryDownloadedData gallery,
+    String imageUrl,
+    int serialNo,
+  ) {
+    String? ext = imageUrl.contains('fullimg.php') ? 'jpg' : imageUrl.split('.').last;
+    return path.join(downloadPath, '${gallery.gid} - ${gallery.sanitizedTitle}', '$serialNo.$ext');
+  }
+
+  static String computeImageDownloadRelativePathWith(
+    String downloadPath,
+    String visibleDirPath,
+    GalleryDownloadedData gallery,
+    String imageUrl,
+    int serialNo,
+  ) {
+    return path.relative(
+      computeImageDownloadAbsolutePathWith(downloadPath, gallery, imageUrl, serialNo),
+      from: visibleDirPath,
+    );
+  }
+
   static String computeImageDownloadAbsolutePathFromRelativePath(String imageRelativePath) {
     String p = path.join(pathService.getVisibleDir().path, imageRelativePath);
 

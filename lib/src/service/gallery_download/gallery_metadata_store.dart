@@ -118,10 +118,15 @@ class _GalleryMetadataStore {
   /// image paths after download-location change, and the downloaded-status
   /// sanity check).
   ///
-  /// Static so it can run in a background isolate via [Isolate.run] — the
-  /// method has no instance state, only static deps (path/jsonDecode/
-  /// DownloadPathResolver/model fromJson).
-  static ({GalleryDownloadedData gallery, List<GalleryImage?> images})? readForRestore(io.Directory galleryDir) {
+  /// [downloadPath] and [visibleDirPath] are passed explicitly so this method
+  /// is safe to call inside a worker isolate via [Isolate.run] — the global
+  /// [downloadSetting] / [pathService] singletons are NOT initialised in a
+  /// spawned isolate, so accessing them would throw [LateInitializationError].
+  static ({GalleryDownloadedData gallery, List<GalleryImage?> images})? readForRestore(
+    io.Directory galleryDir,
+    String downloadPath,
+    String visibleDirPath,
+  ) {
     final Map<String, dynamic>? raw = read(galleryDir);
     if (raw == null) {
       return null;
@@ -144,7 +149,13 @@ class _GalleryMetadataStore {
       if (images[serialNo] == null) {
         continue;
       }
-      images[serialNo]!.path = DownloadPathResolver.computeImageDownloadRelativePath(gallery, _downloadUrlFor(gallery, images[serialNo]!), serialNo);
+      images[serialNo]!.path = DownloadPathResolver.computeImageDownloadRelativePathWith(
+        downloadPath,
+        visibleDirPath,
+        gallery,
+        _downloadUrlFor(gallery, images[serialNo]!),
+        serialNo,
+      );
       images[serialNo]!.imageHash ??= '';
     }
 
