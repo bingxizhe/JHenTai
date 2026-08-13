@@ -7,7 +7,7 @@ import 'package:jhentai/src/enum/config_enum.dart';
 import 'package:jhentai/src/extension/widget_extension.dart';
 import 'package:jhentai/src/pages/download/grid/local/local_gallery_grid_page.dart';
 import 'package:jhentai/src/service/local_config_service.dart';
-import 'package:jhentai/src/service/gallery_download_service.dart';
+import 'package:jhentai/src/service/gallery_download/gallery_download_service.dart';
 import 'package:jhentai/src/service/local_gallery_service.dart';
 import 'package:jhentai/src/setting/preference_setting.dart';
 import 'package:jhentai/src/widget/loading_state_indicator.dart';
@@ -248,13 +248,7 @@ class _LocalGalleryScanProgressBanner extends StatelessWidget {
     String progressText;
 
     if (preferDownload) {
-      if (galleryDownloadService.restoreTotalCount > 0) {
-        progressText = '${'scanningLocalGallerys'.tr} '
-            '${galleryDownloadService.restoreCurrentCount}/'
-            '${galleryDownloadService.restoreTotalCount}';
-      } else {
-        progressText = '${'scanningLocalGallerys'.tr}...';
-      }
+      progressText = '${'scanningLocalGallerys'.tr}...';
     } else if (localGalleryService.totalDirectoryCount > 0) {
       progressText = '${'scanningLocalGallerys'.tr} '
           '${localGalleryService.scannedDirectoryCount}/'

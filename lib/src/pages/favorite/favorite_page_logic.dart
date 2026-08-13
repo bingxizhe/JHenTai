@@ -21,7 +21,7 @@ import '../../exception/eh_site_exception.dart';
 import '../../model/gallery.dart';
 import '../../model/search_config.dart';
 import '../../service/archive_download_service.dart';
-import '../../service/gallery_download_service.dart';
+import '../../service/gallery_download/gallery_download_service.dart';
 import '../../service/local_config_service.dart';
 import '../../setting/user_setting.dart';
 import '../../utils/eh_spider_parser.dart';
@@ -261,7 +261,7 @@ class FavoritePageLogic extends BasePageLogic {
         return null;
       }
 
-      allFavorites.addAll(galleryPage.gallerys);
+      allFavorites.addAll(galleryPage.galleries);
       nextGid = galleryPage.nextGid;
       pageCount++;
 
@@ -363,7 +363,7 @@ class FavoritePageLogic extends BasePageLogic {
     int attempt = 0;
     while (true) {
       try {
-        GalleryDownloadedData galleryDownloadedData = GalleryDownloadedData(
+        GalleryDownloadRequest galleryDownloadRequest = GalleryDownloadRequest(
           gid: gallery.gid,
           token: gallery.token,
           title: gallery.title,
@@ -372,16 +372,12 @@ class FavoritePageLogic extends BasePageLogic {
           galleryUrl: gallery.galleryUrl.url,
           uploader: gallery.uploader,
           publishTime: gallery.publishTime,
-          downloadStatusIndex: DownloadStatus.downloading.index,
           downloadOriginalImage: downloadOriginalImage,
-          sortOrder: 0,
-          groupName: targetGroup,
-          insertTime: insertTime.toString(),
-          priority: GalleryDownloadService.defaultDownloadGalleryPriority,
+          group: targetGroup,
           tags: tagMap2TagString(gallery.tags),
           tagRefreshTime: DateTime.now().toString(),
         );
-        galleryDownloadService.downloadGallery(galleryDownloadedData);
+        galleryDownloadService.downloadGallery(galleryDownloadRequest);
         return true;
       } catch (e) {
         attempt++;
@@ -558,7 +554,7 @@ class FavoritePageLogic extends BasePageLogic {
 
     state.loadingState = LoadingState.loading;
 
-    state.gallerys.clear();
+    state.galleries.clear();
     state.prevGid = null;
     state.nextGid = null;
     state.seek = DateTime.now();
@@ -662,16 +658,16 @@ class FavoritePageLogic extends BasePageLogic {
       return;
     }
 
-    List<Gallery> gallerys = await postHandleNewGallerys(galleryPage.gallerys);
+    List<Gallery> gallerys = await postHandleNewGalleries(galleryPage.galleries);
 
-    state.gallerys.addAll(gallerys);
+    state.galleries.addAll(gallerys);
     state.totalCount = galleryPage.totalCount;
     state.nextGid = galleryPage.nextGid;
     state.favoriteSortOrder = galleryPage.favoriteSortOrder;
 
     if (state.nextGid == null &&
         state.prevGid == null &&
-        state.gallerys.isEmpty) {
+        state.galleries.isEmpty) {
       state.loadingState = LoadingState.noData;
     } else if (state.nextGid == null) {
       state.loadingState = LoadingState.noMore;

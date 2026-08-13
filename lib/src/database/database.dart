@@ -66,7 +66,7 @@ class AppDb extends _$AppDb {
   AppDb() : super(_openConnection());
 
   @override
-  int get schemaVersion => 24;
+  int get schemaVersion => 25;
 
   @override
   MigrationStrategy get migration {
@@ -166,6 +166,25 @@ class AppDb extends _$AppDb {
               await m.alterTable(TableMigration(galleryDownloaded, newColumns: [galleryDownloaded.sanitizedTitle])); // ignore: experimental_member_use
               await _backfillSanitizedTitles();
             }
+            if (from < 25) {
+              /// Add `originalImageUrl` column to the `image` table. The DB
+              /// `url` column previously stored whichever URL was actually
+              /// downloaded (regular or original); new rows store the regular
+              /// URL in `url` and the original URL here. Old rows keep `url`
+              /// as-is (may be original URL for download-original galleries)
+              /// and `originalImageUrl` stays null — runtime fallback
+              /// (`originalImageUrl ?? url`) handles this transparently.
+              try {
+                await m.addColumn(image, image.originalImageUrl);
+              } on SqliteException catch (e) {
+                log.warning('Add originalImageUrl column failed: ${e.message}');
+                if (e.extendedResultCode == SqlError.SQLITE_ERROR && e.message.contains('duplicate column name')) {
+                  log.warning('Ignore duplicate column name error: ${e.message}');
+                } else {
+                  rethrow;
+                }
+              }
+            }
           });
         } on Exception catch (e) {
           log.error(e);
@@ -201,9 +220,9 @@ class AppDb extends _$AppDb {
       await m.createTable(galleryHistory);
 
       if (Get.isRegistered<StorageService>()) {
-        List<Gallery>? gallerys = storageService.read<List>(ConfigEnum.oldGalleryHistory.key)?.map((e) => Gallery.fromJson(e)).toList();
+        List<Gallery>? galleries = storageService.read<List>(ConfigEnum.oldGalleryHistory.key)?.map((e) => Gallery.fromJson(e)).toList();
 
-        List<GalleryHistoryModel>? historyModels = gallerys
+        List<GalleryHistoryModel>? historyModels = galleries
             ?.map(
               (g) => GalleryHistoryModel(
                 galleryUrl: g.galleryUrl,
@@ -249,7 +268,7 @@ class AppDb extends _$AppDb {
       await m.createTable(galleryGroup);
       await m.createTable(archiveGroup);
 
-      Set<String> galleryGroups = (await GalleryDao.selectOldGallerys()).map((g) => g.groupName ?? 'default'.tr).toSet();
+      Set<String> galleryGroups = (await GalleryDao.selectOldGalleries()).map((g) => g.groupName ?? 'default'.tr).toSet();
       Set<String> archiveGroups = (await ArchiveDao.selectOldArchives()).map((g) => g.groupName ?? 'default'.tr).toSet();
 
       log.info('Migrate gallery groups: $galleryGroups');
@@ -310,9 +329,9 @@ class AppDb extends _$AppDb {
       await m.createTable(galleryDownloaded);
       await m.createTable(archiveDownloaded);
 
-      List<GalleryDownloadedOldData> gallerys = await GalleryDao.selectOldGallerys();
+      List<GalleryDownloadedOldData> galleries = await GalleryDao.selectOldGalleries();
       await appDb.transaction(() async {
-        for (GalleryDownloadedOldData g in gallerys) {
+        for (GalleryDownloadedOldData g in galleries) {
           await GalleryDao.insertGallery(
             GalleryDownloadedCompanion.insert(
               gid: Value(g.gid),
@@ -416,7 +435,7 @@ class AppDb extends _$AppDb {
       }
     });
 
-    final List<GalleryDownloadedData> galleries = await GalleryDao.selectGallerys();
+    final List<GalleryDownloadedData> galleries = await GalleryDao.selectGalleries();
     await transaction(() async {
       for (final GalleryDownloadedData g in galleries) {
         await (update(galleryDownloaded)..where((t) => t.gid.equals(g.gid))).write(

@@ -16,7 +16,7 @@ import 'package:waterfall_flow/waterfall_flow.dart';
 import '../consts/locale_consts.dart';
 import '../utils/date_util.dart';
 import '../service/archive_download_service.dart';
-import '../service/gallery_download_service.dart';
+import '../service/gallery_download/gallery_download_service.dart';
 import 'eh_image.dart';
 import 'eh_tag.dart';
 import 'eh_gallery_category_tag.dart';

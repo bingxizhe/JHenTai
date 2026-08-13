@@ -101,11 +101,11 @@ class ScheduleService with JHLifeCircleBeanErrorCatch implements JHLifeCircleBea
 
   Future<void> refreshGalleryTags() async {
     int pageNo = 1;
-    List<GalleryDownloadedData> gallerys = await GalleryDao.selectGallerysForTagRefresh(pageNo, 25);
-    while (gallerys.isNotEmpty) {
+    List<GalleryDownloadedData> galleries = await GalleryDao.selectGalleriesForTagRefresh(pageNo, 25);
+    while (galleries.isNotEmpty) {
       try {
         List<GalleryMetadata> metadatas = await ehRequest.requestGalleryMetadatas<List<GalleryMetadata>>(
-          list: gallerys.map((a) => (gid: a.gid, token: a.token)).toList(),
+          list: galleries.map((a) => (gid: a.gid, token: a.token)).toList(),
           parser: EHSpiderParser.galleryMetadataJson2GalleryMetadatas,
         );
 
@@ -120,13 +120,13 @@ class ScheduleService with JHLifeCircleBeanErrorCatch implements JHLifeCircleBea
               )
               .toList(),
         );
-        log.trace('refreshGalleryTags success, pageNo: $pageNo, archives: ${gallerys.map((a) => a.gid).toList()}');
+        log.trace('refreshGalleryTags success, pageNo: $pageNo, archives: ${galleries.map((a) => a.gid).toList()}');
       } catch (e) {
-        log.warning('refreshGalleryTags error, gallerys: ${gallerys.map((a) => (gid: a.gid, token: a.token)).toList()}', e, true);
+        log.warning('refreshGalleryTags error, galleries: ${galleries.map((a) => (gid: a.gid, token: a.token)).toList()}', e, true);
       }
 
       pageNo++;
-      gallerys = await GalleryDao.selectGallerysForTagRefresh(pageNo, 25);
+      galleries = await GalleryDao.selectGalleriesForTagRefresh(pageNo, 25);
     }
   }
 
@@ -163,6 +163,10 @@ class ScheduleService with JHLifeCircleBeanErrorCatch implements JHLifeCircleBea
 
   Future<void> clearOutdatedImageCache() async {
     Directory cacheImageDirectory = Directory(join((await getTemporaryDirectory()).path, cacheImageFolderName));
+
+    if (!cacheImageDirectory.existsSync()) {
+      return;
+    }
 
     int count = 0;
     cacheImageDirectory.list().forEach((FileSystemEntity entity) {

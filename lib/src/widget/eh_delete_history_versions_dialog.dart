@@ -4,14 +4,13 @@ import 'dart:math';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:jhentai/src/database/database.dart';
 import 'package:jhentai/src/enum/config_enum.dart';
 import 'package:jhentai/src/model/gallery_detail.dart';
 import 'package:jhentai/src/model/gallery_url.dart';
 import 'package:jhentai/src/network/eh_request.dart';
 import 'package:jhentai/src/pages/details/details_page_logic.dart';
 import 'package:jhentai/src/routes/routes.dart';
-import 'package:jhentai/src/service/gallery_download_service.dart';
+import 'package:jhentai/src/service/gallery_download/gallery_download_service.dart';
 import 'package:jhentai/src/service/local_config_service.dart';
 import 'package:jhentai/src/service/log.dart';
 import 'package:jhentai/src/utils/eh_spider_parser.dart';
@@ -33,7 +32,7 @@ class _EHDeleteHistoryVersionsDialogState
     extends State<EHDeleteHistoryVersionsDialog> {
   _DialogPhase phase = _DialogPhase.scanning;
 
-  List<List<GalleryDownloadedData>> versionGroups = [];
+  List<List<GalleryDownloadInfo>> versionGroups = [];
   Set<int> selectedGids = {};
   Set<int> expandedGroups = {};
 
@@ -45,8 +44,8 @@ class _EHDeleteHistoryVersionsDialogState
   int deepScanCurrent = 0;
   int deepScanNewLinks = 0;
 
-  List<GalleryDownloadedData> ungroupedGallerys = [];
-  List<GalleryDownloadedData> failedGallerys = [];
+  List<GalleryDownloadInfo> ungroupedGallerys = [];
+  List<GalleryDownloadInfo> failedGallerys = [];
 
   @override
   void initState() {
@@ -58,32 +57,32 @@ class _EHDeleteHistoryVersionsDialogState
     await Future.delayed(Duration.zero);
 
     try {
-      List<GalleryDownloadedData> allGallerys =
-          List.of(galleryDownloadService.gallerys);
+      List<GalleryDownloadInfo> allGallerys =
+          List.of(galleryDownloadService.galleries);
 
-      Map<String, GalleryDownloadedData> url2Gallery = {
-        for (GalleryDownloadedData g in allGallerys) g.galleryUrl: g,
+      Map<String, GalleryDownloadInfo> url2Gallery = {
+        for (GalleryDownloadInfo g in allGallerys) g.galleryUrl: g,
       };
 
       _UnionFind<int> uf =
           _UnionFind<int>(allGallerys.map((g) => g.gid).toSet());
 
-      for (GalleryDownloadedData g in allGallerys) {
+      for (GalleryDownloadInfo g in allGallerys) {
         if (g.oldVersionGalleryUrl != null) {
-          GalleryDownloadedData? parent = url2Gallery[g.oldVersionGalleryUrl];
+          GalleryDownloadInfo? parent = url2Gallery[g.oldVersionGalleryUrl];
           if (parent != null) {
             uf.union(g.gid, parent.gid);
           }
         }
       }
 
-      Map<int, List<GalleryDownloadedData>> groupMap = {};
-      for (GalleryDownloadedData g in allGallerys) {
+      Map<int, List<GalleryDownloadInfo>> groupMap = {};
+      for (GalleryDownloadInfo g in allGallerys) {
         int root = uf.find(g.gid);
         groupMap.putIfAbsent(root, () => []).add(g);
       }
 
-      List<List<GalleryDownloadedData>> groups =
+      List<List<GalleryDownloadInfo>> groups =
           groupMap.values.where((list) => list.length > 1).map((list) {
         list.sort((a, b) => b.publishTime.compareTo(a.publishTime));
         return list;
@@ -93,11 +92,11 @@ class _EHDeleteHistoryVersionsDialogState
 
       Set<int> groupedGids =
           groups.expand((list) => list).map((g) => g.gid).toSet();
-      List<GalleryDownloadedData> ungrouped =
+      List<GalleryDownloadInfo> ungrouped =
           allGallerys.where((g) => !groupedGids.contains(g.gid)).toList();
 
       Set<int> defaultSelected = {};
-      for (List<GalleryDownloadedData> group in groups) {
+      for (List<GalleryDownloadInfo> group in groups) {
         for (int i = 1; i < group.length; i++) {
           defaultSelected.add(group[i].gid);
         }
@@ -134,7 +133,7 @@ class _EHDeleteHistoryVersionsDialogState
         _mergeNewLinks(saved.newLinks, saved.newLinks.keys.toSet());
         // Restore failed galleries from saved gids
         Set<int> failedGidSet = saved.failedGids.toSet();
-        failedGallerys = galleryDownloadService.gallerys
+        failedGallerys = galleryDownloadService.galleries
             .where((g) => failedGidSet.contains(g.gid))
             .toList();
         if (mounted) {
@@ -228,7 +227,7 @@ class _EHDeleteHistoryVersionsDialogState
   }
 
   Future<void> _executeDeepScan(
-      List<GalleryDownloadedData> galleriesToScan) async {
+      List<GalleryDownloadInfo> galleriesToScan) async {
     setState(() {
       phase = _DialogPhase.deepScanning;
       deepScanTotal = galleriesToScan.length;
@@ -236,8 +235,8 @@ class _EHDeleteHistoryVersionsDialogState
       deepScanNewLinks = 0;
     });
 
-    Map<String, GalleryDownloadedData> url2Gallery = {
-      for (GalleryDownloadedData g in galleryDownloadService.gallerys)
+    Map<String, GalleryDownloadInfo> url2Gallery = {
+      for (GalleryDownloadInfo g in galleryDownloadService.galleries)
         g.galleryUrl: g,
     };
 
@@ -248,7 +247,7 @@ class _EHDeleteHistoryVersionsDialogState
 
     Set<int> newlyLinked = {};
     Map<int, Set<int>> newLinks = {};
-    List<GalleryDownloadedData> newlyFailed = [];
+    List<GalleryDownloadInfo> newlyFailed = [];
 
     for (int i = 0; i < galleriesToScan.length; i += 5) {
       int batchEnd = min(i + 5, galleriesToScan.length);
@@ -315,8 +314,8 @@ class _EHDeleteHistoryVersionsDialogState
   }
 
   Future<bool> _deepScanSingleGallery(
-    GalleryDownloadedData gallery,
-    Map<String, GalleryDownloadedData> url2Gallery,
+    GalleryDownloadInfo gallery,
+    Map<String, GalleryDownloadInfo> url2Gallery,
     Map<int, Set<int>> newLinks,
     Set<int> newlyLinked,
   ) async {
@@ -350,8 +349,8 @@ class _EHDeleteHistoryVersionsDialogState
   /// Returns true on success, false on failure (after all retries).
   Future<bool> _fetchAndProcessDetail(
     String url,
-    GalleryDownloadedData gallery,
-    Map<String, GalleryDownloadedData> url2Gallery,
+    GalleryDownloadInfo gallery,
+    Map<String, GalleryDownloadInfo> url2Gallery,
     Map<int, Set<int>> newLinks,
     Set<int> newlyLinked,
   ) async {
@@ -368,7 +367,7 @@ class _EHDeleteHistoryVersionsDialogState
       GalleryDetail detail = result.galleryDetails;
 
       if (detail.parentGalleryUrl != null) {
-        GalleryDownloadedData? parent =
+        GalleryDownloadInfo? parent =
             url2Gallery[detail.parentGalleryUrl!.url];
         if (parent != null && parent.gid != gallery.gid) {
           int g1 = gallery.gid;
@@ -382,9 +381,9 @@ class _EHDeleteHistoryVersionsDialogState
         }
       }
 
-      if (detail.childrenGallerys != null) {
-        for (var child in detail.childrenGallerys!) {
-          GalleryDownloadedData? childGallery =
+      if (detail.childrenGalleries != null) {
+        for (var child in detail.childrenGalleries!) {
+          GalleryDownloadInfo? childGallery =
               url2Gallery[child.galleryUrl.url];
           if (childGallery != null && childGallery.gid != gallery.gid) {
             int g1 = gallery.gid;
@@ -406,18 +405,18 @@ class _EHDeleteHistoryVersionsDialogState
   }
 
   void _mergeNewLinks(Map<int, Set<int>> newLinks, Set<int> newlyLinked) {
-    List<GalleryDownloadedData> allGallerys =
-        List.of(galleryDownloadService.gallerys);
-    Map<String, GalleryDownloadedData> url2Gallery = {
-      for (GalleryDownloadedData g in allGallerys) g.galleryUrl: g,
+    List<GalleryDownloadInfo> allGallerys =
+        List.of(galleryDownloadService.galleries);
+    Map<String, GalleryDownloadInfo> url2Gallery = {
+      for (GalleryDownloadInfo g in allGallerys) g.galleryUrl: g,
     };
 
     Set<int> validGids = allGallerys.map((g) => g.gid).toSet();
     _UnionFind<int> uf = _UnionFind<int>(validGids);
 
-    for (GalleryDownloadedData g in allGallerys) {
+    for (GalleryDownloadInfo g in allGallerys) {
       if (g.oldVersionGalleryUrl != null) {
-        GalleryDownloadedData? parent = url2Gallery[g.oldVersionGalleryUrl];
+        GalleryDownloadInfo? parent = url2Gallery[g.oldVersionGalleryUrl];
         if (parent != null) {
           uf.union(g.gid, parent.gid);
         }
@@ -432,13 +431,13 @@ class _EHDeleteHistoryVersionsDialogState
       }
     });
 
-    Map<int, List<GalleryDownloadedData>> groupMap = {};
-    for (GalleryDownloadedData g in allGallerys) {
+    Map<int, List<GalleryDownloadInfo>> groupMap = {};
+    for (GalleryDownloadInfo g in allGallerys) {
       int root = uf.find(g.gid);
       groupMap.putIfAbsent(root, () => []).add(g);
     }
 
-    List<List<GalleryDownloadedData>> groups =
+    List<List<GalleryDownloadInfo>> groups =
         groupMap.values.where((list) => list.length > 1).map((list) {
       list.sort((a, b) => b.publishTime.compareTo(a.publishTime));
       return list;
@@ -448,7 +447,7 @@ class _EHDeleteHistoryVersionsDialogState
 
     Set<int> groupedGids =
         groups.expand((list) => list).map((g) => g.gid).toSet();
-    for (List<GalleryDownloadedData> group in groups) {
+    for (List<GalleryDownloadInfo> group in groups) {
       bool isNewGroup = !versionGroups.any((existing) =>
           existing.any((g) => group.any((g2) => g2.gid == g.gid)));
       if (isNewGroup) {
@@ -643,7 +642,7 @@ class _EHDeleteHistoryVersionsDialogState
           return _buildFailedGroup();
         }
 
-        List<GalleryDownloadedData> gallerys = versionGroups[index];
+        List<GalleryDownloadInfo> gallerys = versionGroups[index];
         String title = gallerys.first.title;
 
         return ExpansionTile(
@@ -719,7 +718,7 @@ class _EHDeleteHistoryVersionsDialogState
     );
   }
 
-  Widget _buildGalleryItem(GalleryDownloadedData gallery,
+  Widget _buildGalleryItem(GalleryDownloadInfo gallery,
       {required bool isFirst, bool isFailed = false}) {
     bool isSelected = selectedGids.contains(gallery.gid);
     return CheckboxListTile(
@@ -785,7 +784,7 @@ class _EHDeleteHistoryVersionsDialogState
     );
   }
 
-  void _navigateToDetails(GalleryDownloadedData gallery) {
+  void _navigateToDetails(GalleryDownloadInfo gallery) {
     GalleryUrl? galleryUrl = GalleryUrl.tryParse(gallery.galleryUrl);
     if (galleryUrl == null) return;
     backRoute();
@@ -885,7 +884,7 @@ class _EHDeleteHistoryVersionsDialogState
 
   List<int> get _allSelectableGids {
     List<int> result = [];
-    for (List<GalleryDownloadedData> group in versionGroups) {
+    for (List<GalleryDownloadInfo> group in versionGroups) {
       for (int i = 1; i < group.length; i++) {
         result.add(group[i].gid);
       }
@@ -906,7 +905,7 @@ class _EHDeleteHistoryVersionsDialogState
   }
 
   Future<void> _executeDeletion() async {
-    List<GalleryDownloadedData> toDelete = versionGroups
+    List<GalleryDownloadInfo> toDelete = versionGroups
         .expand((list) => list)
         .where((g) => selectedGids.contains(g.gid))
         .toList();

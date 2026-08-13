@@ -16,7 +16,7 @@ import '../consts/locale_consts.dart';
 import '../model/gallery.dart';
 import '../model/gallery_tag.dart';
 import '../service/archive_download_service.dart';
-import '../service/gallery_download_service.dart';
+import '../service/gallery_download/gallery_download_service.dart';
 import 'eh_gallery_category_tag.dart';
 import 'eh_gallery_list_card_.dart';
 import 'eh_image.dart';

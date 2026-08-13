@@ -110,12 +110,12 @@ mixin LocalGalleryDownloadPageLogicMixin on GetxController {
       return;
     }
 
-    int preCount = localGalleryService.allGallerys.length;
+    int preCount = localGalleryService.allGalleries.length;
 
-    localGalleryService.refreshLocalGallerys().then((_) {
+    localGalleryService.refreshLocalGalleries().then((_) {
       currentPath = LocalGalleryService.rootPath;
       update([bodyId]);
-      toast('${'newGalleryCount'.tr}: ${localGalleryService.allGallerys.length - preCount}');
+      toast('${'newGalleryCount'.tr}: ${localGalleryService.allGalleries.length - preCount}');
     });
   }
 

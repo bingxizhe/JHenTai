@@ -3,7 +3,7 @@ import 'dart:io';
 import 'dart:isolate';
 
 import 'package:get/get.dart';
-import 'package:jhentai/src/service/gallery_download_service.dart';
+import 'package:jhentai/src/service/gallery_download/gallery_download_service.dart';
 import 'package:jhentai/src/utils/file_util.dart';
 import 'package:path/path.dart';
 
@@ -27,7 +27,7 @@ class LocalGalleryService extends GetxController
 
   LoadingState loadingState = LoadingState.idle;
 
-  List<LocalGallery> allGallerys = [];
+  List<LocalGallery> allGalleries = [];
   Map<String, List<LocalGallery>> path2GalleryDir = {};
   Map<String, List<String>> path2SubDir = {};
 
@@ -59,11 +59,11 @@ class LocalGalleryService extends GetxController
     if (_hasScanned) {
       return;
     }
-    log.info('ensureScanned: begin scanning local gallerys');
-    await refreshLocalGallerys();
+    log.info('ensureScanned: begin scanning local galleries');
+    await refreshLocalGalleries();
   }
 
-  Future<void> refreshLocalGallerys() {
+  Future<void> refreshLocalGalleries() {
     if (loadingState == LoadingState.loading) {
       return _refreshTask ?? Future.value();
     }
@@ -77,9 +77,9 @@ class LocalGalleryService extends GetxController
     totalDirectoryCount = 0;
     scanningPath = null;
 
-    int preCount = allGallerys.length;
+    int preCount = allGalleries.length;
 
-    allGallerys.clear();
+    allGalleries.clear();
     path2GalleryDir.clear();
     path2SubDir.clear();
     update([galleryCountChangedId]);
@@ -134,7 +134,7 @@ class LocalGalleryService extends GetxController
       }
     }
 
-    allGallerys.removeWhere((g) => g.title == gallery.title);
+    allGalleries.removeWhere((g) => g.title == gallery.title);
     path2GalleryDir[parentPath]?.removeWhere((g) => g.title == gallery.title);
 
     update([galleryCountChangedId]);
@@ -195,7 +195,7 @@ class LocalGalleryService extends GetxController
 
   void _handleScanDone(
       Map message, int preCount, DateTime start, Completer<void> completer) {
-    allGallerys = ((message['allGallerys'] as List?) ?? [])
+    allGalleries = ((message['allGallerys'] as List?) ?? [])
         .whereType<Map>()
         .map((gallery) =>
             LocalGallery.fromScanMessage(gallery.cast<String, dynamic>()))
@@ -220,7 +220,7 @@ class LocalGalleryService extends GetxController
     scannedDirectoryCount =
         message['scannedDirectoryCount'] ?? scannedDirectoryCount;
     totalDirectoryCount = message['totalDirectoryCount'] ?? totalDirectoryCount;
-    scannedGalleryCount = allGallerys.length;
+    scannedGalleryCount = allGalleries.length;
     scanningPath = null;
     loadingState = LoadingState.success;
     _hasScanned = true;
@@ -228,7 +228,7 @@ class LocalGalleryService extends GetxController
     _disposeScanner();
 
     log.info(
-      'Refresh local gallerys, preCount:$preCount, newCount: ${allGallerys.length}, timeCost: ${DateTime.now().difference(start).inMilliseconds}ms',
+      'Refresh local galleries, preCount:$preCount, newCount: ${allGalleries.length}, timeCost: ${DateTime.now().difference(start).inMilliseconds}ms',
     );
 
     update([galleryCountChangedId]);
