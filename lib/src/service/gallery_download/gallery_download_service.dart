@@ -199,38 +199,142 @@ class GalleryDownloadService extends GetxController with GridBasePageServiceMixi
     }
   }
 
-  /// Fetch the gallery's detail page and persist [oldVersionGalleryUrl] if
-  /// the page exposes a parent gallery link. Runs in the background —
-  /// callers don't await it so download start isn't delayed.
+  /// Fetch the gallery's complete ancestor chain (parent, grandparent, …)
+  /// from the EH detail page and persist it as [oldVersionGalleryUrl]. Runs
+  /// in the background — callers don't await it so download start isn't
+  /// delayed. Used on fresh downloads (when the caller didn't supply a chain)
+  /// so the "Delete history versions" feature can discover cross-version
+  /// relationships without a network deep-scan, even if intermediate versions
+  /// are later deleted.
   Future<void> _fetchAndSetOldVersionGalleryUrl(GalleryDownloadedData gallery) async {
-    final ({GalleryDetail galleryDetails, String apikey}) result = await retry(
-      () => ehRequest.requestDetailPage(
-        galleryUrl: gallery.galleryUrl,
-        useCacheIfAvailable: true,
-        parser: EHSpiderParser.detailPage2GalleryAndDetailAndApikey,
-      ),
-      retryIf: (e) => e is DioException,
-      maxAttempts: 3,
-    );
-    final String? parentUrl = result.galleryDetails.parentGalleryUrl?.url;
-    if (parentUrl == null || parentUrl.isEmpty) {
+    final GalleryUrl? startUrl = GalleryUrl.tryParse(gallery.galleryUrl);
+    if (startUrl == null) {
       return;
     }
-    await updateOldVersionGalleryUrl(gallery.gid, parentUrl);
-    log.info('Fetched oldVersionGalleryUrl=$parentUrl for gallery ${gallery.gid}');
+
+    final List<String> chain = await _fetchFullAncestorChain(startUrl);
+    if (chain.isEmpty) {
+      return;
+    }
+
+    await updateOldVersionChain(gallery.gid, chain);
+    log.info('Fetched ancestor chain (length ${chain.length}) for gallery ${gallery.gid}');
   }
 
-  /// Public API for backfilling [oldVersionGalleryUrl] on an already-downloaded
-  /// gallery. Updates the DB row, the in-memory [GalleryDownloadInfo], and the
-  /// on-disk metadata file. Used by the batch-fetch dialog and by
-  /// [_fetchAndSetOldVersionGalleryUrl] on fresh downloads.
+  /// Recursively crawl `parentGalleryUrl` links up the version tree starting
+  /// from [startUrl], returning the ordered ancestor chain (direct parent
+  /// first, oldest root last). Each hop requests the EH detail page with
+  /// retries + site fallback. Stops when: no parent is found, max depth is
+  /// reached, a cycle is detected, or a hop fails on both sites. If a
+  /// discovered parent is itself a locally-downloaded gallery with a recorded
+  /// chain, that chain is appended and the network crawl stops (short-circuit
+  /// to reuse previously fetched ancestry and avoid redundant requests).
+  ///
+  /// A partial chain (collected before a mid-way network failure) is returned
+  /// so the caller can persist whatever ancestry was discovered.
+  Future<List<String>> _fetchFullAncestorChain(GalleryUrl startUrl) async {
+    const int maxDepth = 20;
+    final List<String> chain = <String>[];
+    final Set<String> visited = <String>{startUrl.url};
+
+    GalleryUrl? current = startUrl;
+    for (int depth = 0; depth < maxDepth; depth++) {
+      if (current == null) {
+        break;
+      }
+
+      final String? parentUrl = await _fetchParentUrlWithFallback(current);
+      if (parentUrl == null || parentUrl.isEmpty) {
+        break;
+      }
+
+      if (visited.contains(parentUrl)) {
+        log.warning('version chain crawl: cycle detected at $parentUrl, stopping');
+        break;
+      }
+
+      chain.add(parentUrl);
+      visited.add(parentUrl);
+
+      /// Short-circuit: if the parent is local and already has a recorded
+      /// chain, append it and stop the network crawl.
+      final GalleryDownloadInfo? parentLocal = galleries.firstWhereOrNull((g) => g.galleryUrl == parentUrl);
+      if (parentLocal != null && parentLocal.hasVersionChain) {
+        for (final String ancestor in parentLocal.oldVersionChain) {
+          if (!visited.contains(ancestor)) {
+            chain.add(ancestor);
+            visited.add(ancestor);
+          }
+        }
+        break;
+      }
+
+      current = GalleryUrl.tryParse(parentUrl);
+    }
+
+    return chain;
+  }
+
+  /// Fetch a single gallery's parent URL from the EH detail page, with retries
+  /// on the original site then retries on the opposite site. Returns the
+  /// parent URL string, or null on failure / no-parent.
+  Future<String?> _fetchParentUrlWithFallback(GalleryUrl galleryUrl) async {
+    final String? parent = await _tryFetchParentUrl(galleryUrl.url);
+    if (parent != null) {
+      return parent;
+    }
+
+    final GalleryUrl altUrl = galleryUrl.copyWith(isEH: !galleryUrl.isEH);
+    return _tryFetchParentUrl(altUrl.url);
+  }
+
+  /// Request one detail page and extract parentGalleryUrl. Returns null on
+  /// network failure after retries or when the gallery has no parent.
+  Future<String?> _tryFetchParentUrl(String url) async {
+    try {
+      final ({GalleryDetail galleryDetails, String apikey}) result = await retry(
+        () => ehRequest.requestDetailPage(
+          galleryUrl: url,
+          useCacheIfAvailable: true,
+          parser: EHSpiderParser.detailPage2GalleryAndDetailAndApikey,
+        ),
+        retryIf: (e) => e is DioException,
+        maxAttempts: 3,
+      );
+      return result.galleryDetails.parentGalleryUrl?.url;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /// Public API for backfilling a single-hop parent URL as
+  /// [oldVersionGalleryUrl] on an already-downloaded gallery. Updates the DB
+  /// row, the in-memory [GalleryDownloadInfo], and the on-disk metadata file.
+  /// Used by [_fetchAndSetOldVersionGalleryUrl] on fresh downloads.
+  ///
+  /// The parent URL is stored as a single-element chain `["parentUrl"]` so the
+  /// storage format is uniform. To record a multi-hop ancestor chain (e.g.
+  /// discovered by the batch-fetch dialog's recursive crawl), use
+  /// [updateOldVersionChain] instead.
   Future<void> updateOldVersionGalleryUrl(int gid, String parentUrl) async {
+    return updateOldVersionChain(gid, <String>[parentUrl]);
+  }
+
+  /// Public API for backfilling a complete ancestor chain (ordered from direct
+  /// parent at index 0 to the oldest known root at the last index) as
+  /// [oldVersionGalleryUrl]. Updates the DB row, the in-memory
+  /// [GalleryDownloadInfo], and the on-disk metadata file. Used by the
+  /// batch-fetch dialog when it recursively crawls parent links.
+  ///
+  /// Passing an empty chain clears the recorded relationship (stores null).
+  Future<void> updateOldVersionChain(int gid, List<String> chain) async {
+    final String? encoded = GalleryDownloadInfo.encodeVersionChain(chain);
     await _updateGalleryInDatabase(
-      GalleryDownloadedCompanion(gid: Value(gid), oldVersionGalleryUrl: Value(parentUrl)),
+      GalleryDownloadedCompanion(gid: Value(gid), oldVersionGalleryUrl: Value(encoded)),
     );
     final GalleryDownloadInfo? info = galleryDownloadInfos[gid];
     if (info != null) {
-      info.oldVersionGalleryUrl = parentUrl;
+      info.oldVersionGalleryUrl = encoded;
       _saveGalleryMetadataInDisk(info);
     }
   }
@@ -267,7 +371,7 @@ class GalleryDownloadService extends GetxController with GridBasePageServiceMixi
       uploader: request.uploader,
       publishTime: request.publishTime,
       downloadStatusIndex: status.index,
-      insertTime: DateTime.now().toString(),
+      insertTime: request.insertTime ?? DateTime.now().toString(),
       downloadOriginalImage: request.downloadOriginalImage,
       priority: request.priority ?? defaultDownloadGalleryPriority,
       sortOrder: request.sortOrder ?? 0,
@@ -587,7 +691,9 @@ class GalleryDownloadService extends GetxController with GridBasePageServiceMixi
       group: oldGallery.group,
       tags: tagMap2TagString(newGalleryDetail.tags),
       tagRefreshTime: DateTime.now().toString(),
-      oldVersionGalleryUrl: oldGallery.galleryUrl,
+      oldVersionGalleryUrl: GalleryDownloadInfo.encodeVersionChain(
+        <String>[oldGallery.galleryUrl, ...oldGallery.oldVersionChain],
+      ),
     );
 
     downloadGallery(newGalleryRequest);
@@ -799,7 +905,7 @@ class GalleryDownloadService extends GetxController with GridBasePageServiceMixi
       return false;
     }
 
-    GalleryDownloadInfo? oldGallery = galleries.firstWhereOrNull((g) => g.oldVersionGalleryUrl == gallery.galleryUrl);
+    GalleryDownloadInfo? oldGallery = galleries.firstWhereOrNull((g) => g.directParentUrl == gallery.galleryUrl);
     if (oldGallery == null) {
       return false;
     }
@@ -1668,15 +1774,21 @@ class GalleryDownloadRequest {
   final String tags;
   final String? tagRefreshTime;
 
-  /// Set when this request is a gallery update from an older version.
+  /// Ancestor version chain encoded as a JSON-array string (direct parent
+  /// first, oldest root last), or a legacy single-URL string for records
+  /// written before the chain format was introduced. Set when this request
+  /// is a gallery update from an older version — [updateGallery] populates
+  /// it by prepending the old gallery's URL to the old gallery's own chain.
   final String? oldVersionGalleryUrl;
 
   /// Optional overrides for service-owned fields. Null = service picks defaults
-  /// (sortOrder=0, priority=[defaultDownloadGalleryPriority]). Used by
-  /// [reDownloadGallery] to preserve user-assigned sort/priority across
-  /// re-downloads.
+  /// (sortOrder=0, priority=[defaultDownloadGalleryPriority], insertTime=now).
+  /// Used by [reDownloadGallery] to preserve user-assigned sort/priority across
+  /// re-downloads, and by batch-favorite-download to stagger insertTime so the
+  /// priority scheduler downloads galleries one-by-one (not all at once).
   final int? sortOrder;
   final int? priority;
+  final String? insertTime;
 
   const GalleryDownloadRequest({
     required this.gid,
@@ -1694,6 +1806,7 @@ class GalleryDownloadRequest {
     this.oldVersionGalleryUrl,
     this.sortOrder,
     this.priority,
+    this.insertTime,
   });
 }
 
@@ -1728,8 +1841,60 @@ class GalleryDownloadInfo implements Comparable<GalleryDownloadInfo> {
 
   /// Mutable so [_fetchAndSetOldVersionGalleryUrl] can backfill it from the
   /// network after download start. Persisted to DB + metadata on update.
+  ///
+  /// Storage format (backwards-compatible):
+  ///   - null                         → no known parent version
+  ///   - "https://e-hentai.org/g/..."  → legacy single-URL record (direct parent only)
+  ///   - "[\"url1\",\"url2\",...]"      → JSON array of ancestor URLs, ordered from
+  ///                                     direct parent (index 0) to oldest root.
+  /// The array form lets the "Delete history versions" feature detect version
+  /// relationships across multiple hops even when intermediate versions have
+  /// been deleted locally — any URL in the chain that still exists locally is
+  /// enough to link two galleries into the same version group.
   String? oldVersionGalleryUrl;
   final String? sanitizedTitle;
+
+  /// Parse [oldVersionGalleryUrl] into an ordered ancestor chain.
+  /// Returns `[]` when null, `[url]` for legacy single-URL records, and the
+  /// decoded list for JSON-array records. Order: direct parent first, oldest root last.
+  List<String> get oldVersionChain => decodeVersionChain(oldVersionGalleryUrl);
+
+  /// The direct parent version URL (single hop). Used by the upgrade migrator
+  /// to locate the immediate predecessor for image-byte reuse. Returns null
+  /// when no parent is recorded.
+  String? get directParentUrl {
+    final List<String> chain = oldVersionChain;
+    return chain.isEmpty ? null : chain.first;
+  }
+
+  /// Whether any version relationship is recorded for this gallery.
+  bool get hasVersionChain => oldVersionGalleryUrl != null && oldVersionGalleryUrl!.isNotEmpty;
+
+  /// Decode a stored [oldVersionGalleryUrl] value into an ordered ancestor chain.
+  /// Tolerates null, legacy single-URL strings, and JSON-array strings.
+  static List<String> decodeVersionChain(String? stored) {
+    if (stored == null || stored.isEmpty) {
+      return const <String>[];
+    }
+    if (stored.startsWith('[')) {
+      try {
+        return (jsonDecode(stored) as List).cast<String>();
+      } catch (e) {
+        log.error('decodeVersionChain: failed to parse JSON array, falling back to single-URL', e);
+        return [stored];
+      }
+    }
+    return [stored];
+  }
+
+  /// Encode an ordered ancestor chain (direct parent first) into the storage
+  /// format. Returns null for an empty chain, a JSON-array string otherwise.
+  static String? encodeVersionChain(List<String> chain) {
+    if (chain.isEmpty) {
+      return null;
+    }
+    return jsonEncode(chain);
+  }
 
   /// Pre-parsed `MMddHHmmss` of [insertTime]. Cached at construction so
   /// [_computeGalleryTaskPriority] avoids `DateFormat.parse` on every image

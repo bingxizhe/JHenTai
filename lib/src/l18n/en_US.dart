@@ -637,7 +637,7 @@ class en_US {
       'close': 'Close',
       'scanning': 'Scanning',
       'deleteHistoryVersionsHint':
-          'Groups by version chain (oldVersionGalleryUrl), not by name. Use deep scan to find remote links.',
+          'Groups by full ancestor chain, not by name. Works even if intermediate versions are deleted. Use deep scan to find remote links.',
       'deletingHistoryVersions': 'Deleting history versions',
       'deletingHistoryVersionsInProgress':
           'Deleting history versions, please wait',

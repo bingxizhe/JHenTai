@@ -1,3 +1,4 @@
+
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -9,13 +10,20 @@ import 'package:jhentai/src/service/log.dart';
 import 'package:jhentai/src/utils/eh_spider_parser.dart';
 import 'package:retry/retry.dart';
 
-/// A dialog that scans every downloaded gallery, fetches its parent gallery
-/// URL from the EH detail page, and persists it as [oldVersionGalleryUrl].
+/// A dialog that scans every downloaded gallery, fetches its complete ancestor
+/// chain (parent, grandparent, …) from the EH detail page, and persists it as
+/// [oldVersionGalleryUrl] (a JSON-array string).
+///
+/// The recursive crawl walks `parentGalleryUrl` links up the version tree until
+/// it reaches a gallery with no parent, hits the max-depth guard, or detects a
+/// cycle. A partial chain (obtained before a mid-way network failure) is still
+/// persisted — every discovered ancestor is valuable for the "Delete history
+/// versions" grouping.
 ///
 /// Retry strategy matches the "Delete history versions" deep-scan logic:
 ///   1. Try the site the gallery URL currently points to (5 retries)
 ///   2. On failure, try the opposite site (5 retries)
-///   3. On still-failure, record the gallery in the failed list
+///   3. On still-failure, return what has been collected so far
 class EHFetchOldVersionUrlsDialog extends StatefulWidget {
   const EHFetchOldVersionUrlsDialog({Key? key}) : super(key: key);
 
@@ -156,8 +164,8 @@ class _EHFetchOldVersionUrlsDialogState extends State<EHFetchOldVersionUrlsDialo
   }
 
   Future<void> _fetchForGallery(GalleryDownloadInfo gallery) async {
-    /// Skip galleries that already have oldVersionGalleryUrl set.
-    if (gallery.oldVersionGalleryUrl != null) {
+    /// Skip galleries that already have a non-empty version chain.
+    if (gallery.hasVersionChain) {
       return;
     }
 
@@ -168,31 +176,116 @@ class _EHFetchOldVersionUrlsDialogState extends State<EHFetchOldVersionUrlsDialo
       return;
     }
 
-    /// Phase 1: try original site (5 retries)
-    bool success = await _fetchAndPersist(galleryUrl.url, gallery);
-    if (success) {
-      updatedCount++;
+    /// Recursively crawl parent links to build the full ancestor chain.
+    /// A partial chain (collected before a mid-way failure) is still persisted.
+    final ({List<String> chain, bool anySuccess}) result =
+        await _fetchFullAncestorChain(galleryUrl, gallery.gid);
+
+    if (!result.anySuccess) {
+      /// Every network attempt failed — record as a failed gallery.
+      failedCount++;
+      failedTitles.add(gallery.title);
       return;
+    }
+
+    if (result.chain.isEmpty) {
+      /// At least one request succeeded but no parent was found — this is a
+      /// leaf gallery with no ancestry, not a failure.
+      return;
+    }
+
+    await galleryDownloadService.updateOldVersionChain(gallery.gid, result.chain);
+    updatedCount++;
+    log.info('fetchOldVersionUrls: set chain (length ${result.chain.length}) for gallery ${gallery.gid}');
+  }
+
+  /// Crawl `parentGalleryUrl` links starting from [startUrl] up the version
+  /// tree, returning the ordered ancestor chain (direct parent first, oldest
+  /// root last) and whether any network request succeeded. Stops when: no
+  /// parent is found, max depth is reached, a cycle is detected, or a hop
+  /// fails on both sites. Each hop uses the same 5-retry + site-fallback
+  /// strategy as the deep scan.
+  Future<({List<String> chain, bool anySuccess})> _fetchFullAncestorChain(GalleryUrl startUrl, int gid) async {
+    const int maxDepth = 20;
+    final List<String> chain = <String>[];
+    final Set<String> visited = <String>{startUrl.url};
+    bool anySuccess = false;
+
+    GalleryUrl? current = startUrl;
+    for (int depth = 0; depth < maxDepth; depth++) {
+      if (current == null) {
+        break;
+      }
+
+      final ({bool success, String? parentUrl}) hop = await _fetchParentUrl(current, gid);
+      if (hop.success) {
+        anySuccess = true;
+      }
+
+      if (!hop.success) {
+        /// Both sites failed for this hop — stop, keep the partial chain.
+        break;
+      }
+
+      final String? parentUrl = hop.parentUrl;
+      if (parentUrl == null || parentUrl.isEmpty) {
+        /// Request succeeded but this gallery has no parent — reached the root.
+        break;
+      }
+
+      /// Cycle guard — the site returned a parent we've already visited
+      /// (shouldn't happen on well-formed data, but protects against loops).
+      if (visited.contains(parentUrl)) {
+        log.warning('fetchOldVersionUrls: cycle detected at $parentUrl for gallery $gid, stopping crawl');
+        break;
+      }
+
+      chain.add(parentUrl);
+      visited.add(parentUrl);
+
+      /// If the parent is itself a locally-downloaded gallery that already has
+      /// a recorded chain, we can short-circuit: append the known chain and
+      /// stop the network crawl. This reuses previously fetched ancestry and
+      /// avoids redundant requests.
+      final GalleryDownloadInfo? parentLocal = galleryDownloadService.galleries
+          .firstWhereOrNull((g) => g.galleryUrl == parentUrl);
+      if (parentLocal != null && parentLocal.hasVersionChain) {
+        for (final String ancestor in parentLocal.oldVersionChain) {
+          if (!visited.contains(ancestor)) {
+            chain.add(ancestor);
+            visited.add(ancestor);
+          }
+        }
+        break;
+      }
+
+      current = GalleryUrl.tryParse(parentUrl);
+    }
+
+    return (chain: chain, anySuccess: anySuccess);
+  }
+
+  /// Fetch a single gallery's detail page and return its parentGalleryUrl.
+  /// Returns a record: [success] is true if at least one site responded;
+  /// [parentUrl] is the parent URL (null/empty if the gallery has no parent).
+  Future<({bool success, String? parentUrl})> _fetchParentUrl(GalleryUrl galleryUrl, int gid) async {
+    /// Phase 1: try original site (5 retries)
+    final ({bool success, String? parentUrl}) r1 = await _tryFetchParent(galleryUrl.url, gid);
+    if (r1.success) {
+      return r1;
     }
 
     /// Phase 2: fallback to opposite site (5 retries)
     final GalleryUrl altUrl = galleryUrl.copyWith(isEH: !galleryUrl.isEH);
     log.warning(
-        'fetchOldVersionUrls: gallery ${gallery.gid} failed on ${galleryUrl.isEH ? "e-hentai" : "exhentai"}, trying ${altUrl.isEH ? "e-hentai" : "exhentai"}');
-    success = await _fetchAndPersist(altUrl.url, gallery);
-    if (success) {
-      updatedCount++;
-      return;
-    }
-
-    /// Phase 3: record failure
-    failedCount++;
-    failedTitles.add(gallery.title);
+        'fetchOldVersionUrls: gallery $gid failed on ${galleryUrl.isEH ? "e-hentai" : "exhentai"}, trying ${altUrl.isEH ? "e-hentai" : "exhentai"}');
+    return _tryFetchParent(altUrl.url, gid);
   }
 
-  /// Fetch detail page and persist parentGalleryUrl if found.
-  /// Returns true on success (even if no parent URL found), false on failure.
-  Future<bool> _fetchAndPersist(String url, GalleryDownloadInfo gallery) async {
+  /// Request one detail page and extract parentGalleryUrl.
+  /// Returns [success=true] with the parent URL (null if no parent) on a
+  /// successful response, or [success=false] on network failure after retries.
+  Future<({bool success, String? parentUrl})> _tryFetchParent(String url, int gid) async {
     try {
       final ({GalleryDetail galleryDetails, String apikey}) result = await retry(
         () => ehRequest.requestDetailPage(
@@ -203,15 +296,10 @@ class _EHFetchOldVersionUrlsDialogState extends State<EHFetchOldVersionUrlsDialo
         retryIf: (e) => e is DioException,
         maxAttempts: 5,
       );
-      final String? parentUrl = result.galleryDetails.parentGalleryUrl?.url;
-      if (parentUrl != null && parentUrl.isNotEmpty) {
-        await galleryDownloadService.updateOldVersionGalleryUrl(gallery.gid, parentUrl);
-        log.info('fetchOldVersionUrls: set oldVersionGalleryUrl=$parentUrl for gallery ${gallery.gid}');
-      }
-      return true;
+      return (success: true, parentUrl: result.galleryDetails.parentGalleryUrl?.url);
     } catch (e) {
-      log.warning('fetchOldVersionUrls: failed to fetch detail for gallery ${gallery.gid}', e);
-      return false;
+      log.warning('fetchOldVersionUrls: failed to fetch detail for gallery $gid at $url', e);
+      return (success: false, parentUrl: null);
     }
   }
 }

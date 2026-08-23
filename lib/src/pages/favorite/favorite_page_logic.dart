@@ -375,6 +375,7 @@ class FavoritePageLogic extends BasePageLogic {
           group: targetGroup,
           tags: tagMap2TagString(gallery.tags),
           tagRefreshTime: DateTime.now().toString(),
+          insertTime: insertTime.toString(),
         );
         galleryDownloadService.downloadGallery(galleryDownloadRequest);
         return true;

@@ -23,7 +23,7 @@ class _GalleryDownloadTaskRunner {
       }
 
       /// If this is a update from old gallery, try to fetch image hashes from JHenTai Server
-      if (gallery.oldVersionGalleryUrl != null && downloadSetting.useJH2UpdateGallery.isTrue) {
+      if (gallery.directParentUrl != null && downloadSetting.useJH2UpdateGallery.isTrue) {
         List<String> imageHashes = await fetchImageHashesFromJHenTaiServer();
 
         if (imageHashes.length == gallery.pageCount) {
@@ -173,8 +173,8 @@ class _GalleryDownloadTaskRunner {
       GalleryDownloadInfo galleryDownloadInfo = _service.galleryDownloadInfos[gallery.gid]!;
 
       /// If this is a update from old gallery, try to copy from existing old image first
-      if (gallery.oldVersionGalleryUrl != null) {
-        await _service._upgradeMigrator.tryCopyImageInfoFromHref(gallery.oldVersionGalleryUrl!, gallery, serialNo);
+      if (gallery.directParentUrl != null) {
+        await _service._upgradeMigrator.tryCopyImageInfoFromHref(gallery.directParentUrl!, gallery, serialNo);
 
         if (galleryDownloadInfo.imageAtSync(serialNo) != null) {
           return;
@@ -259,8 +259,8 @@ class _GalleryDownloadTaskRunner {
       await _service._updateImageStatus(gallery, image, serialNo, DownloadStatus.downloading);
 
       /// If this is a update from old gallery, try to copy from existing old image first
-      if (gallery.oldVersionGalleryUrl != null) {
-        await _service._upgradeMigrator.tryCopyImageInfoFromImage(gallery.oldVersionGalleryUrl!, gallery, serialNo);
+      if (gallery.directParentUrl != null) {
+        await _service._upgradeMigrator.tryCopyImageInfoFromImage(gallery.directParentUrl!, gallery, serialNo);
 
         if (image.downloadStatus == DownloadStatus.downloaded) {
           return;

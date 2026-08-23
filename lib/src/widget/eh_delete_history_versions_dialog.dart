@@ -67,19 +67,19 @@ class _EHDeleteHistoryVersionsDialogState
       _UnionFind<int> uf =
           _UnionFind<int>(allGallerys.map((g) => g.gid).toSet());
 
-      /// Link galleries by [oldVersionGalleryUrl] — explicit version
-      /// relations recorded at download time (e.g. user tapped "Update"
-      /// in the detail page) or backfilled by the "Fetch old version links"
-      /// tool. This is the only reliable local signal; title+uploader
-      /// matching was removed as unreliable (false positives when the same
-      /// uploader reposts unrelated galleries with identical titles).
+      /// Link galleries by [oldVersionGalleryUrl] — the stored value is an
+      /// ordered ancestor chain (direct parent first, oldest root last),
+      /// encoded as a JSON array string. We union the current gallery with
+      /// every ancestor URL that resolves to a locally-downloaded gallery, so
+      /// two galleries that share any common ancestor — even if intermediate
+      /// versions have been deleted — end up in the same version group.
       /// Use the "Fetch old version links" tool or deep scan to discover
       /// relations not captured at download time.
       for (GalleryDownloadInfo g in allGallerys) {
-        if (g.oldVersionGalleryUrl != null) {
-          GalleryDownloadInfo? parent = url2Gallery[g.oldVersionGalleryUrl];
-          if (parent != null) {
-            uf.union(g.gid, parent.gid);
+        for (String ancestorUrl in g.oldVersionChain) {
+          GalleryDownloadInfo? ancestor = url2Gallery[ancestorUrl];
+          if (ancestor != null && ancestor.gid != g.gid) {
+            uf.union(g.gid, ancestor.gid);
           }
         }
       }
@@ -423,10 +423,10 @@ class _EHDeleteHistoryVersionsDialogState
     _UnionFind<int> uf = _UnionFind<int>(validGids);
 
     for (GalleryDownloadInfo g in allGallerys) {
-      if (g.oldVersionGalleryUrl != null) {
-        GalleryDownloadInfo? parent = url2Gallery[g.oldVersionGalleryUrl];
-        if (parent != null) {
-          uf.union(g.gid, parent.gid);
+      for (String ancestorUrl in g.oldVersionChain) {
+        GalleryDownloadInfo? ancestor = url2Gallery[ancestorUrl];
+        if (ancestor != null && ancestor.gid != g.gid) {
+          uf.union(g.gid, ancestor.gid);
         }
       }
     }
@@ -783,7 +783,7 @@ class _EHDeleteHistoryVersionsDialogState
       ),
       subtitle: Text(
         '${gallery.pageCount} ${'pages'.tr}'
-        '${gallery.oldVersionGalleryUrl != null ? ' · ${'linkedVersion'.tr}' : ''}',
+        '${gallery.hasVersionChain ? ' · ${'linkedVersion'.tr}' : ''}',
         style: TextStyle(
           fontSize: 12,
           color: Theme.of(context).colorScheme.onSurfaceVariant,

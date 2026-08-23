@@ -603,7 +603,7 @@ class zh_CN {
       'start': '开始',
       'close': '关闭',
       'scanning': '扫描中',
-      'deleteHistoryVersionsHint': '按版本链（oldVersionGalleryUrl）分组，而非按名称分组。可使用深度扫描查找远程关联。',
+      'deleteHistoryVersionsHint': '按完整祖先链分组，而非按名称分组。即使中间版本已删除也能关联。可使用深度扫描查找远程关联。',
       'deletingHistoryVersions': '正在删除历史版本',
       'deletingHistoryVersionsInProgress': '正在删除历史版本，请稍候',
       'deleteHistoryVersionsCompleted': '删除历史版本完成',
