@@ -628,7 +628,7 @@ class en_US {
       'deleteHistoryVersions': 'Delete History Versions',
       'fetchOldVersionUrls': 'Fetch Old Version Links',
       'fetchOldVersionUrlsHint':
-          'Fetch parent gallery URLs from EH for all downloaded galleries to enable "Delete history versions" without deep scan. Tries e-hentai first, then exhentai, then records failures.',
+          'Fetch the complete ancestor chain (parent, grandparent, …) from EH for all downloaded galleries, enabling "Delete history versions" to group cross-multi-hop relationships. Legacy single-URL records are automatically upgraded to the full chain. Tries e-hentai first, then exhentai, then records failures.',
       'fetchOldVersionUrlsProgress': 'Fetching {count}/{total}',
       'fetchOldVersionUrlsDone': 'Done: {updated} updated, {failed} failed',
       'updatedCount': 'Updated',

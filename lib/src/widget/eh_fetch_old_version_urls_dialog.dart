@@ -20,6 +20,11 @@ import 'package:retry/retry.dart';
 /// persisted — every discovered ancestor is valuable for the "Delete history
 /// versions" grouping.
 ///
+/// Legacy single-URL records (written before the chain format was introduced)
+/// are automatically upgraded: the known parent seeds the chain and crawling
+/// resumes from there, so cross-multi-hop relationships are discovered without
+/// re-requesting the gallery's own detail page.
+///
 /// Retry strategy matches the "Delete history versions" deep-scan logic:
 ///   1. Try the site the gallery URL currently points to (5 retries)
 ///   2. On failure, try the opposite site (5 retries)
@@ -164,8 +169,11 @@ class _EHFetchOldVersionUrlsDialogState extends State<EHFetchOldVersionUrlsDialo
   }
 
   Future<void> _fetchForGallery(GalleryDownloadInfo gallery) async {
-    /// Skip galleries that already have a non-empty version chain.
-    if (gallery.hasVersionChain) {
+    /// Skip galleries that already have a new-format (JSON-array) chain.
+    /// Legacy single-URL records are re-crawled to upgrade them to a full
+    /// ancestor chain — without this, cross-multi-hop version relationships
+    /// captured before the chain format would never be discovered.
+    if (gallery.hasVersionChain && !gallery.isLegacyVersionUrl) {
       return;
     }
 
@@ -176,13 +184,21 @@ class _EHFetchOldVersionUrlsDialogState extends State<EHFetchOldVersionUrlsDialo
       return;
     }
 
+    /// For legacy single-URL records, seed the chain with the known parent
+    /// and continue crawling from there instead of re-requesting the
+    /// gallery's own detail page. This upgrades the record to the full
+    /// ancestor-chain format while avoiding a redundant network request.
+    final List<String> knownAncestors = gallery.oldVersionChain;
+
     /// Recursively crawl parent links to build the full ancestor chain.
     /// A partial chain (collected before a mid-way failure) is still persisted.
     final ({List<String> chain, bool anySuccess}) result =
-        await _fetchFullAncestorChain(galleryUrl, gallery.gid);
+        await _fetchFullAncestorChain(galleryUrl, gallery.gid, knownAncestors: knownAncestors);
 
-    if (!result.anySuccess) {
-      /// Every network attempt failed — record as a failed gallery.
+    if (!result.anySuccess && knownAncestors.isEmpty) {
+      /// No known ancestors and every network attempt failed — record as a
+      /// failed gallery. When known ancestors exist we still persist them
+      /// (upgrading the format) even if the deeper crawl failed.
       failedCount++;
       failedTitles.add(gallery.title);
       return;
@@ -205,13 +221,29 @@ class _EHFetchOldVersionUrlsDialogState extends State<EHFetchOldVersionUrlsDialo
   /// parent is found, max depth is reached, a cycle is detected, or a hop
   /// fails on both sites. Each hop uses the same 5-retry + site-fallback
   /// strategy as the deep scan.
-  Future<({List<String> chain, bool anySuccess})> _fetchFullAncestorChain(GalleryUrl startUrl, int gid) async {
+  ///
+  /// [knownAncestors] seeds the chain with previously-recorded ancestors
+  /// (e.g. a legacy single-URL record's direct parent). Crawling then
+  /// resumes from the last known ancestor instead of re-requesting the
+  /// gallery's own detail page, so legacy records are upgraded to the full
+  /// chain format without redundant network requests.
+  Future<({List<String> chain, bool anySuccess})> _fetchFullAncestorChain(
+    GalleryUrl startUrl, int gid, {
+    List<String> knownAncestors = const <String>[],
+  }) async {
     const int maxDepth = 20;
-    final List<String> chain = <String>[];
-    final Set<String> visited = <String>{startUrl.url};
+    final List<String> chain = <String>[...knownAncestors];
+    final Set<String> visited = <String>{startUrl.url, ...knownAncestors};
     bool anySuccess = false;
 
-    GalleryUrl? current = startUrl;
+    /// Start crawling from the last known ancestor (if any) so we don't
+    /// re-request the gallery's own detail page when a parent is already
+    /// recorded. For legacy single-URL records this means we begin at the
+    /// known parent and look for the grandparent.
+    GalleryUrl? current = knownAncestors.isEmpty
+        ? startUrl
+        : GalleryUrl.tryParse(knownAncestors.last);
+
     for (int depth = 0; depth < maxDepth; depth++) {
       if (current == null) {
         break;

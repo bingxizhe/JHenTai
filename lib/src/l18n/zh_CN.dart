@@ -595,7 +595,7 @@ class zh_CN {
       'loadingGalleriesProgress': '正在加载画廊 {count}/{total}',
       'deleteHistoryVersions': '删除历史版本',
       'fetchOldVersionUrls': '获取历史版本链接',
-      'fetchOldVersionUrlsHint': '联网获取所有下载画廊的父画廊链接，用于"删除历史版本"功能识别版本关系。先使用表站，失败则使用里站，再失败则输出失败项。',
+      'fetchOldVersionUrlsHint': '联网获取所有下载画廊的完整祖先链（父版本、祖父版本……），用于"删除历史版本"功能识别跨多跳的版本关系。旧格式的单链接记录会自动升级为完整祖先链。先使用表站，失败则使用里站，再失败则输出失败项。',
       'fetchOldVersionUrlsProgress': '正在获取 {count}/{total}',
       'fetchOldVersionUrlsDone': '完成：更新 {updated} 个，失败 {failed} 个',
       'updatedCount': '已更新',

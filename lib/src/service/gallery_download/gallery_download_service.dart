@@ -1870,6 +1870,16 @@ class GalleryDownloadInfo implements Comparable<GalleryDownloadInfo> {
   /// Whether any version relationship is recorded for this gallery.
   bool get hasVersionChain => oldVersionGalleryUrl != null && oldVersionGalleryUrl!.isNotEmpty;
 
+  /// Whether [oldVersionGalleryUrl] is a legacy single-URL record written
+  /// before the ancestor-chain format was introduced. Such records only
+  /// capture the direct parent and should be re-crawled by the "Fetch old
+  /// version links" tool to build the full ancestor chain. Once re-crawled
+  /// the value is stored as a JSON array and this returns false.
+  bool get isLegacyVersionUrl {
+    final String? v = oldVersionGalleryUrl;
+    return v != null && v.isNotEmpty && !v.startsWith('[');
+  }
+
   /// Decode a stored [oldVersionGalleryUrl] value into an ordered ancestor chain.
   /// Tolerates null, legacy single-URL strings, and JSON-array strings.
   static List<String> decodeVersionChain(String? stored) {
