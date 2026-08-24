@@ -51,3 +51,11 @@ app.*.map.json
 # IDE/Tool directories
 .arts/
 .trae/
+.codeartsdoer/
+.claude/
+.codegraph/
+.joycode/
+
+# Temporary files
+temp_gallery.html
+temp_new_gallery.html

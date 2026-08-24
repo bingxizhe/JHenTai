@@ -135,7 +135,7 @@ class _GalleryMetadataStore {
     if (raw == null) {
       return null;
     }
-    return _buildRestoredRecord(raw, downloadPath, visibleDirPath);
+    return _buildRestoredRecord(raw, downloadPath, visibleDirPath, path.basename(galleryDir.path));
   }
 
   /// Read + parse the metadata file in [galleryDir]. Returns null if the file
@@ -192,7 +192,7 @@ class _GalleryMetadataStore {
     if (raw == null) {
       return null;
     }
-    return _buildRestoredRecord(raw, downloadPath, visibleDirPath);
+    return _buildRestoredRecord(raw, downloadPath, visibleDirPath, path.basename(galleryDir.path));
   }
 
   /// Async variant of [read] — uses [File.exists] / [File.readAsString] so the
@@ -242,10 +242,22 @@ class _GalleryMetadataStore {
     Map<String, dynamic> raw,
     String downloadPath,
     String visibleDirPath,
+    String? diskDirName,
   ) {
     GalleryDownloadedData gallery = GalleryDownloadedData.fromJson(raw['gallery']);
 
-    if (gallery.sanitizedTitle == null) {
+    /// The on-disk directory name is the source of truth for sanitizedTitle.
+    /// Legacy metadata (sanitizedTitle == null) was written by the old 85-char
+    /// truncation algorithm and the directory was never renamed, so recomputing
+    /// with the current 200-byte algorithm would yield a different title and
+    /// break every image path. Prefer the disk directory name whenever it
+    /// matches the gallery's gid; only fall back to recomputation when the
+    /// directory name is unavailable.
+    final String? diskSanitizedTitle = _extractDiskSanitizedTitle(diskDirName, gallery.gid);
+    if (diskSanitizedTitle != null &&
+        (gallery.sanitizedTitle == null || gallery.sanitizedTitle != diskSanitizedTitle)) {
+      gallery = gallery.copyWith(sanitizedTitle: Value(diskSanitizedTitle));
+    } else if (gallery.sanitizedTitle == null) {
       final int reservedBytes = utf8.encode('${gallery.gid} - ').length;
       gallery = gallery.copyWith(
         sanitizedTitle: Value(DownloadPathResolver.computeSanitizedGalleryTitle(gallery.title, reservedBytes)),
@@ -276,5 +288,20 @@ class _GalleryMetadataStore {
     }
 
     return (gallery: gallery, images: images);
+  }
+
+  /// Extract the sanitized title portion from an on-disk directory name of the
+  /// form `'{gid} - {sanitizedTitle}'`. Returns null when [diskDirName] is null
+  /// or does not start with the expected `'{gid} - '` prefix, so callers can
+  /// safely fall back to recomputation.
+  static String? _extractDiskSanitizedTitle(String? diskDirName, int gid) {
+    if (diskDirName == null) {
+      return null;
+    }
+    final String prefix = '$gid - ';
+    if (!diskDirName.startsWith(prefix)) {
+      return null;
+    }
+    return diskDirName.substring(prefix.length);
   }
 }

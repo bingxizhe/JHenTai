@@ -60,9 +60,8 @@ class _EHDeleteHistoryVersionsDialogState
       List<GalleryDownloadInfo> allGallerys =
           List.of(galleryDownloadService.galleries);
 
-      Map<String, GalleryDownloadInfo> url2Gallery = {
-        for (GalleryDownloadInfo g in allGallerys) g.galleryUrl: g,
-      };
+      Map<String, GalleryDownloadInfo> url2Gallery =
+          _buildUrl2GalleryMap(allGallerys);
 
       _UnionFind<int> uf =
           _UnionFind<int>(allGallerys.map((g) => g.gid).toSet());
@@ -243,10 +242,8 @@ class _EHDeleteHistoryVersionsDialogState
       deepScanNewLinks = 0;
     });
 
-    Map<String, GalleryDownloadInfo> url2Gallery = {
-      for (GalleryDownloadInfo g in galleryDownloadService.galleries)
-        g.galleryUrl: g,
-    };
+    Map<String, GalleryDownloadInfo> url2Gallery =
+        _buildUrl2GalleryMap(galleryDownloadService.galleries);
 
     // Load previously saved links to accumulate across scans (initial + retries)
     ({Map<int, Set<int>> newLinks, List<int> failedGids})? saved =
@@ -415,9 +412,8 @@ class _EHDeleteHistoryVersionsDialogState
   void _mergeNewLinks(Map<int, Set<int>> newLinks, Set<int> newlyLinked) {
     List<GalleryDownloadInfo> allGallerys =
         List.of(galleryDownloadService.galleries);
-    Map<String, GalleryDownloadInfo> url2Gallery = {
-      for (GalleryDownloadInfo g in allGallerys) g.galleryUrl: g,
-    };
+    Map<String, GalleryDownloadInfo> url2Gallery =
+        _buildUrl2GalleryMap(allGallerys);
 
     Set<int> validGids = allGallerys.map((g) => g.gid).toSet();
     _UnionFind<int> uf = _UnionFind<int>(validGids);
@@ -940,6 +936,24 @@ class _EHDeleteHistoryVersionsDialogState
     if (mounted) {
       setState(() => phase = _DialogPhase.completed);
     }
+  }
+
+  /// Build a lookup map keyed by *both* the e-hentai.org and exhentai.org
+  /// URL forms of each gallery. Ancestor chains ([GalleryDownloadInfo.oldVersionChain])
+  /// may be stored with either domain depending on where the gallery was
+  /// fetched from, so we need to resolve both forms to the same gallery
+  /// instance when grouping versions.
+  Map<String, GalleryDownloadInfo> _buildUrl2GalleryMap(
+      Iterable<GalleryDownloadInfo> galleries) {
+    Map<String, GalleryDownloadInfo> map = {};
+    for (GalleryDownloadInfo g in galleries) {
+      map[g.galleryUrl] = g;
+      GalleryUrl? parsed = GalleryUrl.tryParse(g.galleryUrl);
+      if (parsed != null) {
+        map[parsed.copyWith(isEH: !parsed.isEH).url] = g;
+      }
+    }
+    return map;
   }
 }
 

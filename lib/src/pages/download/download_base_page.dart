@@ -9,6 +9,7 @@ import 'package:jhentai/src/pages/download/grid/local/local_gallery_grid_page.da
 import 'package:jhentai/src/service/local_config_service.dart';
 import 'package:jhentai/src/service/gallery_download/gallery_download_service.dart';
 import 'package:jhentai/src/service/local_gallery_service.dart';
+import 'package:jhentai/src/service/log.dart';
 import 'package:jhentai/src/setting/preference_setting.dart';
 import 'package:jhentai/src/widget/loading_state_indicator.dart';
 import 'package:simple_animations/animation_controller_extension/animation_controller_extension.dart';
@@ -37,6 +38,15 @@ class _DownloadPageState extends State<DownloadPage> {
   @override
   void initState() {
     super.initState();
+    log.info('DownloadPage.initState: triggering scans');
+
+    /// Trigger scans immediately — they're async and internally wait for
+    /// their respective service init (e.g. [GalleryDownloadService.completed]
+    /// or the [_hasScanned] guard).  Placing them inside [whenComplete] was
+    /// fragile: if [localConfigService.read] never completed, neither scan
+    /// would start, leaving downloaded galleries invisible.
+    localGalleryService.ensureScanned();
+    galleryDownloadService.ensureRestored();
 
     localConfigService
         .read(configKey: ConfigEnum.downloadPageBodyType)
@@ -47,7 +57,6 @@ class _DownloadPageState extends State<DownloadPage> {
       }
     }).whenComplete(() {
       bodyTypeCompleter.complete();
-      localGalleryService.ensureScanned();
     });
   }
 

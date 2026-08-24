@@ -236,6 +236,11 @@ class _EHFetchOldVersionUrlsDialogState extends State<EHFetchOldVersionUrlsDialo
     final Set<String> visited = <String>{startUrl.url, ...knownAncestors};
     bool anySuccess = false;
 
+    /// Once a hop succeeds only on the fallback site, all subsequent hops
+    /// skip the original site and go straight to the site that worked.
+    /// null = use the URL's own site first; true = force e-hentai; false = force exhentai.
+    bool? forceIsEH;
+
     /// Start crawling from the last known ancestor (if any) so we don't
     /// re-request the gallery's own detail page when a parent is already
     /// recorded. For legacy single-URL records this means we begin at the
@@ -249,9 +254,16 @@ class _EHFetchOldVersionUrlsDialogState extends State<EHFetchOldVersionUrlsDialo
         break;
       }
 
-      final ({bool success, String? parentUrl}) hop = await _fetchParentUrl(current, gid);
+      final ({bool success, String? parentUrl, bool? usedIsEH}) hop =
+          await _fetchParentUrl(current, gid, forceIsEH: forceIsEH);
       if (hop.success) {
         anySuccess = true;
+        /// Lock to the fallback site if this hop only succeeded there,
+        /// so later hops skip the dead site entirely.
+        if (forceIsEH == null && hop.usedIsEH != null && hop.usedIsEH != current.isEH) {
+          forceIsEH = hop.usedIsEH;
+          log.info('fetchOldVersionUrls: locking subsequent hops to ${forceIsEH! ? "e-hentai" : "exhentai"} for gallery $gid');
+        }
       }
 
       if (!hop.success) {
@@ -279,8 +291,21 @@ class _EHFetchOldVersionUrlsDialogState extends State<EHFetchOldVersionUrlsDialo
       /// a recorded chain, we can short-circuit: append the known chain and
       /// stop the network crawl. This reuses previously fetched ancestry and
       /// avoids redundant requests.
-      final GalleryDownloadInfo? parentLocal = galleryDownloadService.galleries
-          .firstWhereOrNull((g) => g.galleryUrl == parentUrl);
+      ///
+      /// Match by gid+token ignoring domain: the parent URL may be an
+      /// exhentai.org URL (when the fallback site was used) while the local
+      /// gallery was downloaded from e-hentai.org, or vice versa.
+      final GalleryUrl? parentParsed = GalleryUrl.tryParse(parentUrl);
+      final GalleryDownloadInfo? parentLocal = parentParsed == null
+          ? null
+          : galleryDownloadService.galleries.firstWhereOrNull(
+              (g) {
+                GalleryUrl? gp = GalleryUrl.tryParse(g.galleryUrl);
+                return gp != null &&
+                    gp.gid == parentParsed.gid &&
+                    gp.token == parentParsed.token;
+              },
+            );
       if (parentLocal != null && parentLocal.hasVersionChain) {
         for (final String ancestor in parentLocal.oldVersionChain) {
           if (!visited.contains(ancestor)) {
@@ -299,19 +324,34 @@ class _EHFetchOldVersionUrlsDialogState extends State<EHFetchOldVersionUrlsDialo
 
   /// Fetch a single gallery's detail page and return its parentGalleryUrl.
   /// Returns a record: [success] is true if at least one site responded;
-  /// [parentUrl] is the parent URL (null/empty if the gallery has no parent).
-  Future<({bool success, String? parentUrl})> _fetchParentUrl(GalleryUrl galleryUrl, int gid) async {
+  /// [parentUrl] is the parent URL (null/empty if the gallery has no parent);
+  /// [usedIsEH] is the site that actually responded (null on total failure).
+  ///
+  /// [forceIsEH] skips the original-site attempt and goes straight to the
+  /// specified site. Set by the caller after an earlier hop only succeeded
+  /// on the fallback site, to avoid wasting a round-trip on the dead site.
+  Future<({bool success, String? parentUrl, bool? usedIsEH})> _fetchParentUrl(
+    GalleryUrl galleryUrl, int gid, {
+    bool? forceIsEH,
+  }) async {
+    if (forceIsEH != null) {
+      final GalleryUrl forcedUrl = galleryUrl.copyWith(isEH: forceIsEH);
+      final ({bool success, String? parentUrl}) r = await _tryFetchParent(forcedUrl.url, gid);
+      return (success: r.success, parentUrl: r.parentUrl, usedIsEH: r.success ? forceIsEH : null);
+    }
+
     /// Phase 1: try original site (5 retries)
     final ({bool success, String? parentUrl}) r1 = await _tryFetchParent(galleryUrl.url, gid);
     if (r1.success) {
-      return r1;
+      return (success: true, parentUrl: r1.parentUrl, usedIsEH: galleryUrl.isEH);
     }
 
     /// Phase 2: fallback to opposite site (5 retries)
     final GalleryUrl altUrl = galleryUrl.copyWith(isEH: !galleryUrl.isEH);
     log.warning(
         'fetchOldVersionUrls: gallery $gid failed on ${galleryUrl.isEH ? "e-hentai" : "exhentai"}, trying ${altUrl.isEH ? "e-hentai" : "exhentai"}');
-    return _tryFetchParent(altUrl.url, gid);
+    final ({bool success, String? parentUrl}) r2 = await _tryFetchParent(altUrl.url, gid);
+    return (success: r2.success, parentUrl: r2.parentUrl, usedIsEH: r2.success ? altUrl.isEH : null);
   }
 
   /// Request one detail page and extract parentGalleryUrl.

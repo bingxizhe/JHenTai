@@ -112,27 +112,13 @@ class LocalGalleryService extends GetxController
 
     Directory dir = Directory(gallery.path);
 
-    List<File> allFiles = dir.listSync().whereType<File>().toList();
-    List<File> imageFiles = dir
-        .listSync()
-        .whereType<File>()
-        .where((image) => FileUtil.isImageExtension(image.path))
-        .toList();
-    if (allFiles.length == imageFiles.length) {
-      dir.delete(recursive: true).catchError((e) {
-        log.error('Delete local gallery error!', e);
-        log.uploadError(e);
-        return dir;
-      });
-    } else {
-      for (File file in imageFiles) {
-        file.delete().catchError((e) {
-          log.error('Delete local gallery error!', e);
-          log.uploadError(e);
-          return file;
-        });
-      }
-    }
+    /// Always remove the entire gallery directory (images, metadata, and any
+    /// other contents) so no empty folder or half-deleted state remains.
+    dir.delete(recursive: true).catchError((e) {
+      log.error('Delete local gallery error!', e);
+      log.uploadError(e);
+      return dir;
+    });
 
     allGalleries.removeWhere((g) => g.title == gallery.title);
     path2GalleryDir[parentPath]?.removeWhere((g) => g.title == gallery.title);
@@ -161,16 +147,13 @@ class LocalGalleryService extends GetxController
         visibleDirPath: visibleDirPath,
       );
 
-      context.totalDirectoryCount = _countDirectories(scanPaths);
+      context.totalDirectoryCount = await _countDirectoriesAsync(scanPaths);
       log.info('_loadGalleriesFromDisk: counted ${context.totalDirectoryCount} directories');
       context.sendProgress('counting-done', force: true);
 
       for (int i = 0; i < scanPaths.length; i++) {
         log.info('_loadGalleriesFromDisk: scanning ${scanPaths[i]}');
-        _parseLocalGalleryDirectory(context, Directory(scanPaths[i]), true);
-        /// Yield to the event loop between scan paths so the UI stays
-        /// responsive. Individual [Directory.listSync] calls are fast enough
-        /// that we don't need per-directory yields.
+        await _parseLocalGalleryDirectoryAsync(context, Directory(scanPaths[i]), true);
         await Future.delayed(Duration.zero);
       }
 
@@ -307,92 +290,93 @@ class _LocalGalleryDirectoryScanResult {
   bool isLegalNestedGalleryDir = false;
 }
 
-int _countDirectories(List<String> scanPaths) {
-  int count = 0;
-  for (String scanPath in scanPaths) {
-    count += _countDirectoriesRecursive(Directory(scanPath));
-  }
-  return count;
-}
-
-int _countDirectoriesRecursive(Directory directory) {
-  if (!directory.existsSync()) {
-    return 0;
-  }
-  if (File(join(directory.path, GalleryDownloadService.metadataFileName))
-      .existsSync()) {
-    return 0;
-  }
-  if (File(join(directory.path, ArchiveDownloadService.metadataFileName))
-      .existsSync()) {
-    return 0;
+  Future<int> _countDirectoriesAsync(List<String> scanPaths) async {
+    int count = 0;
+    for (String scanPath in scanPaths) {
+      count += await _countDirectoriesRecursiveAsync(Directory(scanPath));
+    }
+    return count;
   }
 
-  int count = 1;
-  try {
-    for (FileSystemEntity entity in directory.listSync()) {
-      if (entity is Directory) {
-        count += _countDirectoriesRecursive(entity);
+  Future<int> _countDirectoriesRecursiveAsync(Directory directory) async {
+    if (!await directory.exists()) {
+      return 0;
+    }
+    if (await File(join(directory.path, GalleryDownloadService.metadataFileName))
+        .exists()) {
+      return 0;
+    }
+    if (await File(join(directory.path, ArchiveDownloadService.metadataFileName))
+        .exists()) {
+      return 0;
+    }
+
+    int count = 1;
+    try {
+      await for (FileSystemEntity entity in directory.list()) {
+        if (entity is Directory) {
+          count += await _countDirectoriesRecursiveAsync(entity);
+        }
+      }
+    } catch (_) {}
+    return count;
+  }
+
+  Future<_LocalGalleryDirectoryScanResult> _parseLocalGalleryDirectoryAsync(
+      _LocalGalleryScanContext context, Directory directory, bool isRootDir) async {
+    _LocalGalleryDirectoryScanResult result = _LocalGalleryDirectoryScanResult();
+    context.scannedDirectoryCount++;
+    context.sendProgress(directory.path);
+
+    if (!await directory.exists()) {
+      return result;
+    }
+
+    if (await File(join(directory.path, GalleryDownloadService.metadataFileName))
+        .exists()) {
+      return result;
+    }
+
+    if (await File(join(directory.path, ArchiveDownloadService.metadataFileName))
+        .exists()) {
+      return result;
+    }
+
+    List<File> images = [];
+    List<Directory> subDirectories = [];
+    String parentPath =
+        isRootDir ? LocalGalleryService.rootPath : directory.parent.path;
+
+    await for (FileSystemEntity entity in directory.list()) {
+      if (entity is File && FileUtil.isImageExtension(entity.path)) {
+        result.isLegalGalleryDir = true;
+        images.add(entity);
+      } else if (entity is Directory) {
+        subDirectories.add(entity);
       }
     }
-  } catch (_) {}
-  return count;
-}
 
-_LocalGalleryDirectoryScanResult _parseLocalGalleryDirectory(
-    _LocalGalleryScanContext context, Directory directory, bool isRootDir) {
-  _LocalGalleryDirectoryScanResult result = _LocalGalleryDirectoryScanResult();
-  context.scannedDirectoryCount++;
-  context.sendProgress(directory.path);
-
-  if (!directory.existsSync()) {
-    return result;
-  }
-
-  if (File(join(directory.path, GalleryDownloadService.metadataFileName))
-      .existsSync()) {
-    return result;
-  }
-
-  if (File(join(directory.path, ArchiveDownloadService.metadataFileName))
-      .existsSync()) {
-    return result;
-  }
-
-  List<File> images = [];
-  List<Directory> subDirectories = [];
-  String parentPath =
-      isRootDir ? LocalGalleryService.rootPath : directory.parent.path;
-
-  for (FileSystemEntity entity in directory.listSync()) {
-    if (entity is File && FileUtil.isImageExtension(entity.path)) {
-      result.isLegalGalleryDir = true;
-      images.add(entity);
-    } else if (entity is Directory) {
-      subDirectories.add(entity);
-    }
-  }
-
-  for (Directory subDirectory in subDirectories) {
-    _LocalGalleryDirectoryScanResult subResult =
-        _parseLocalGalleryDirectory(context, subDirectory, false);
-    if (subResult.isLegalGalleryDir || subResult.isLegalNestedGalleryDir) {
-      result.isLegalNestedGalleryDir = true;
-      List<String> subDirs = context.path2SubDir[parentPath] ??= [];
-      if (!subDirs.contains(directory.path)) {
-        subDirs.add(directory.path);
+    for (Directory subDirectory in subDirectories) {
+      _LocalGalleryDirectoryScanResult subResult =
+          await _parseLocalGalleryDirectoryAsync(context, subDirectory, false);
+      if (subResult.isLegalGalleryDir || subResult.isLegalNestedGalleryDir) {
+        result.isLegalNestedGalleryDir = true;
+        List<String> subDirs = context.path2SubDir[parentPath] ??= [];
+        if (!subDirs.contains(directory.path)) {
+          subDirs.add(directory.path);
+        }
       }
+      await Future.delayed(Duration.zero);
     }
-  }
 
-  if (result.isLegalGalleryDir) {
-    images.sort(FileUtil.naturalCompareFile);
-    _initLocalGalleryInfo(
-        context, directory, images.first, parentPath);
-  }
+    if (result.isLegalGalleryDir) {
+      images.sort(FileUtil.naturalCompareFile);
+      _initLocalGalleryInfo(
+          context, directory, images.first, parentPath);
+    }
 
-  return result;
-}
+    return result;
+  }
 
 void _initLocalGalleryInfo(_LocalGalleryScanContext context,
     Directory galleryDir, File coverImage, String parentPath) {

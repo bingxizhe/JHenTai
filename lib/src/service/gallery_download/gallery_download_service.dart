@@ -237,15 +237,29 @@ class GalleryDownloadService extends GetxController with GridBasePageServiceMixi
     final List<String> chain = <String>[];
     final Set<String> visited = <String>{startUrl.url};
 
+    /// Once a hop succeeds only on the fallback site, all subsequent hops
+    /// skip the original site and go straight to the site that worked.
+    /// null = use the URL's own site first; true = force e-hentai; false = force exhentai.
+    bool? forceIsEH;
+
     GalleryUrl? current = startUrl;
     for (int depth = 0; depth < maxDepth; depth++) {
       if (current == null) {
         break;
       }
 
-      final String? parentUrl = await _fetchParentUrlWithFallback(current);
+      final ({String? parentUrl, bool? usedIsEH}) result =
+          await _fetchParentUrlWithFallback(current, forceIsEH: forceIsEH);
+      final String? parentUrl = result.parentUrl;
       if (parentUrl == null || parentUrl.isEmpty) {
         break;
+      }
+
+      /// Lock to the fallback site if this hop only succeeded there,
+      /// so later hops skip the dead site entirely.
+      if (forceIsEH == null && result.usedIsEH != null && result.usedIsEH != current.isEH) {
+        forceIsEH = result.usedIsEH;
+        log.info('version chain crawl: locking subsequent hops to ${forceIsEH! ? "e-hentai" : "exhentai"} for gallery ${startUrl.url}');
       }
 
       if (visited.contains(parentUrl)) {
@@ -258,7 +272,19 @@ class GalleryDownloadService extends GetxController with GridBasePageServiceMixi
 
       /// Short-circuit: if the parent is local and already has a recorded
       /// chain, append it and stop the network crawl.
-      final GalleryDownloadInfo? parentLocal = galleries.firstWhereOrNull((g) => g.galleryUrl == parentUrl);
+      ///
+      /// Match by gid+token ignoring domain: the parent URL may be an
+      /// exhentai.org URL (when the fallback site was used) while the local
+      /// gallery was downloaded from e-hentai.org, or vice versa.
+      final GalleryUrl? parentParsed = GalleryUrl.tryParse(parentUrl);
+      final GalleryDownloadInfo? parentLocal = parentParsed == null
+          ? null
+          : galleries.firstWhereOrNull((g) {
+              GalleryUrl? gp = GalleryUrl.tryParse(g.galleryUrl);
+              return gp != null &&
+                  gp.gid == parentParsed.gid &&
+                  gp.token == parentParsed.token;
+            });
       if (parentLocal != null && parentLocal.hasVersionChain) {
         for (final String ancestor in parentLocal.oldVersionChain) {
           if (!visited.contains(ancestor)) {
@@ -277,15 +303,30 @@ class GalleryDownloadService extends GetxController with GridBasePageServiceMixi
 
   /// Fetch a single gallery's parent URL from the EH detail page, with retries
   /// on the original site then retries on the opposite site. Returns the
-  /// parent URL string, or null on failure / no-parent.
-  Future<String?> _fetchParentUrlWithFallback(GalleryUrl galleryUrl) async {
+  /// parent URL string (or null on failure / no-parent) and the site that
+  /// actually responded ([usedIsEH], null when no site responded).
+  ///
+  /// [forceIsEH] skips the original-site attempt and goes straight to the
+  /// specified site. Set by the caller after an earlier hop only succeeded
+  /// on the fallback site, to avoid wasting a round-trip on the dead site.
+  Future<({String? parentUrl, bool? usedIsEH})> _fetchParentUrlWithFallback(
+    GalleryUrl galleryUrl, {
+    bool? forceIsEH,
+  }) async {
+    if (forceIsEH != null) {
+      final GalleryUrl forcedUrl = galleryUrl.copyWith(isEH: forceIsEH);
+      final String? parent = await _tryFetchParentUrl(forcedUrl.url);
+      return (parentUrl: parent, usedIsEH: parent != null ? forceIsEH : null);
+    }
+
     final String? parent = await _tryFetchParentUrl(galleryUrl.url);
     if (parent != null) {
-      return parent;
+      return (parentUrl: parent, usedIsEH: galleryUrl.isEH);
     }
 
     final GalleryUrl altUrl = galleryUrl.copyWith(isEH: !galleryUrl.isEH);
-    return _tryFetchParentUrl(altUrl.url);
+    final String? parent2 = await _tryFetchParentUrl(altUrl.url);
+    return (parentUrl: parent2, usedIsEH: parent2 != null ? altUrl.isEH : null);
   }
 
   /// Request one detail page and extract parentGalleryUrl. Returns null on
@@ -905,7 +946,19 @@ class GalleryDownloadService extends GetxController with GridBasePageServiceMixi
       return false;
     }
 
-    GalleryDownloadInfo? oldGallery = galleries.firstWhereOrNull((g) => g.directParentUrl == gallery.galleryUrl);
+    /// Match by gid+token ignoring domain: directParentUrl may be stored as
+    /// an exhentai.org URL while the parent's galleryUrl is e-hentai.org.
+    final GalleryUrl? galleryParsed = GalleryUrl.tryParse(gallery.galleryUrl);
+    GalleryDownloadInfo? oldGallery = galleryParsed == null
+        ? null
+        : galleries.firstWhereOrNull((g) {
+            String? dp = g.directParentUrl;
+            if (dp == null) return false;
+            GalleryUrl? dpParsed = GalleryUrl.tryParse(dp);
+            return dpParsed != null &&
+                dpParsed.gid == galleryParsed.gid &&
+                dpParsed.token == galleryParsed.token;
+          });
     if (oldGallery == null) {
       return false;
     }
@@ -947,9 +1000,226 @@ class GalleryDownloadService extends GetxController with GridBasePageServiceMixi
   /// Trigger restore when entering the download page, regardless of
   /// [downloadSetting.restoreTasksAutomatically]. Safe to call multiple
   /// times — [restoreTasks] coalesces concurrent triggers.
+  ///
+  /// After restore, runs [verifyDownloadedGalleriesMetadata] to catch
+  /// galleries whose metadata exists on disk but were skipped or failed
+  /// during the initial restore (e.g. a transient parse error), and to
+  /// log sanitizedTitle mismatches that would cause wrong path lookups.
   Future<void> ensureRestored() async {
     log.info('ensureRestored: called');
     await restoreTasks();
+    await verifyDownloadedGalleriesMetadata();
+  }
+
+  /// Scan the download directory for gallery metadata files and verify that
+  /// every gallery on disk has a corresponding in-memory
+  /// [GalleryDownloadInfo]. This catches two classes of problems:
+  ///
+  /// 1. **Metadata exists but gallery not in memory** — the initial
+  ///    [restoreTasks] parse failed (transient I/O error, corrupt JSON, …)
+  ///    and the gallery was silently skipped. We re-read the metadata and
+  ///    restore the gallery.
+  ///
+  /// 2. **sanitizedTitle mismatch** — the directory name doesn't match the
+  ///    `sanitizedTitle` stored in memory/DB (e.g. the user renamed the
+  ///    directory, or the sanitisation rules changed between versions).
+  ///    We update the DB row so path lookups succeed on next launch.
+  ///
+  /// Runs after [restoreTasks] completes.  Cheap when everything is
+  /// consistent: it only stats files and compares strings, re-reading
+  /// metadata only for galleries that are missing from memory.
+  Future<int> verifyDownloadedGalleriesMetadata() async {
+    await completed;
+
+    final String downloadPath = downloadSetting.downloadPath.value;
+    final String visibleDirPath = pathService.getVisibleDir().path;
+    final io.Directory downloadDir = io.Directory(downloadPath);
+    if (!await downloadDir.exists()) {
+      return 0;
+    }
+
+    int repairedCount = 0;
+
+    final List<io.Directory> galleryDirs = <io.Directory>[];
+    await for (final entity in downloadDir.list()) {
+      if (entity is io.Directory) {
+        galleryDirs.add(entity);
+      }
+    }
+
+    for (int i = 0; i < galleryDirs.length; i++) {
+      final io.Directory dir = galleryDirs[i];
+
+      /// Use async exists() — existsSync() in a loop of hundreds of
+      /// directories blocks the UI thread and freezes the app.
+      final io.File metadataFile =
+          io.File(path.join(dir.path, _GalleryMetadataStore.metadataFileName));
+      if (!await metadataFile.exists()) {
+        if (i % 20 == 0) {
+          await Future.delayed(Duration.zero);
+        }
+        continue;
+      }
+
+      final int? gidFromName = _tryExtractGidFromDirName(dir.path);
+      if (gidFromName == null) {
+        continue;
+      }
+
+      final GalleryDownloadInfo? info = galleryDownloadInfos[gidFromName];
+
+      /// Already loaded — verify path consistency.
+      if (info != null) {
+        final String expectedPath =
+            DownloadPathResolver.computeGalleryDownloadAbsolutePath(info.toGalleryDownloadedData());
+        final bool titleMismatch = !path.equals(expectedPath, dir.path);
+
+        /// Detect stale image paths independently: sanitizedTitle may have
+        /// been repaired in a prior run while image paths were not, so the
+        /// gallery directory now matches but cover/thumbnail files still point
+        /// at the old (full-title) directory. Probe the cover file directly.
+        bool pathStale = false;
+        if (info.coverImage?.path != null) {
+          final String coverAbs =
+              DownloadPathResolver.computeImageDownloadAbsolutePathFromRelativePath(info.coverImage!.path!);
+          pathStale = !await io.File(coverAbs).exists();
+        }
+
+        if (titleMismatch || pathStale) {
+          final String dirName = path.basename(dir.path);
+          final String diskTitle = dirName.substring('$gidFromName - '.length);
+          if (titleMismatch) {
+            log.warning('verifyMetadata: sanitizedTitle mismatch for gallery $gidFromName: '
+                'memory="${info.sanitizedTitle}" disk="$diskTitle"');
+            await _updateGalleryInDatabase(
+              GalleryDownloadedCompanion(gid: Value(gidFromName), sanitizedTitle: Value(diskTitle)),
+            );
+            info.sanitizedTitle = diskTitle;
+          } else {
+            log.warning('verifyMetadata: image paths stale for gallery $gidFromName, recomputing');
+          }
+          /// Recompute every image path so cover/thumbnail loading points at
+          /// the real on-disk directory.
+          await info.ensureImagesLoaded();
+          for (int serialNo = 0; serialNo < info.pageCount; serialNo++) {
+            final GalleryImage? img = info.imageAtSync(serialNo);
+            if (img == null) {
+              continue;
+            }
+            final String newPath = DownloadPathResolver.computeImageDownloadRelativePath(
+              info.toGalleryDownloadedData(),
+              _downloadUrlFor(info.toGalleryDownloadedData(), img),
+              serialNo,
+            );
+            if (img.path == newPath) {
+              continue;
+            }
+            await _updateImageInDatabase(
+              ImageCompanion(gid: Value(info.gid), serialNo: Value(serialNo), path: Value(newPath)),
+            );
+            info.updateImagePath(serialNo, newPath);
+            update(['$downloadImageId::${info.gid}::$serialNo', '$downloadImageUrlId::${info.gid}::$serialNo']);
+          }
+          /// After recompute, probe the cover file again. If it still doesn't
+          /// exist, the gallery was marked downloaded but files are genuinely
+          /// missing (only metadata on disk) — reset to paused so the user can
+          /// re-download instead of the read page loading non-existent files.
+          if (info.downloadProgress.downloadStatus == DownloadStatus.downloaded &&
+              info.coverImage?.path != null) {
+            final String coverAbsAfter =
+                DownloadPathResolver.computeImageDownloadAbsolutePathFromRelativePath(info.coverImage!.path!);
+            if (!await io.File(coverAbsAfter).exists()) {
+              log.warning('verifyMetadata: files missing for downloaded gallery $gidFromName, resetting to paused');
+              await _updateGalleryInDatabase(
+                GalleryDownloadedCompanion(gid: Value(info.gid), downloadStatusIndex: Value(DownloadStatus.paused.index)),
+              );
+              info.downloadProgress.downloadStatus = DownloadStatus.paused;
+              info.downloadProgress.curCount = 0;
+              await GalleryImageDao.updateImageStatusByGallery(info.gid, DownloadStatus.downloaded.index, DownloadStatus.none.index);
+              for (GalleryImage? img in info.images ?? <GalleryImage?>[]) {
+                if (img?.downloadStatus == DownloadStatus.downloaded) {
+                  img?.downloadStatus = DownloadStatus.none;
+                }
+              }
+              update(['$galleryDownloadProgressId::${info.gid}', '$downloadImageId::${info.gid}']);
+            }
+          }
+          repairedCount++;
+        }
+        if (i % 20 == 0) {
+          await Future.delayed(Duration.zero);
+        }
+        continue;
+      }
+
+      /// Not in memory — re-read metadata and restore.
+      log.info('verifyMetadata: gallery $gidFromName has metadata on disk but not in memory, restoring: ${dir.path}');
+      try {
+        final ({GalleryDownloadedData gallery, List<GalleryImage?> images})? restored =
+            await _GalleryMetadataStore.readForRestoreAsync(dir, downloadPath, visibleDirPath);
+        if (restored == null) {
+          log.warning('verifyMetadata: metadata parse returned null for gallery $gidFromName: ${dir.path}');
+          continue;
+        }
+
+        GalleryDownloadedData gallery = restored.gallery;
+        if (gallery.downloadStatusIndex == DownloadStatus.downloading.index) {
+          gallery = gallery.copyWith(downloadStatusIndex: DownloadStatus.paused.index);
+        }
+
+        if (galleryDownloadInfos.containsKey(gallery.gid)) {
+          continue;
+        }
+
+        if (!await _restoreInfoInDatabase(gallery, restored.images)) {
+          log.error('verifyMetadata: restore failed for gallery $gidFromName: ${gallery.title}');
+          _clearGalleryDownloadInfoInDatabase(gallery.gid);
+          continue;
+        }
+
+        _initGalleryInfoInMemoryWithImages(gallery, restored.images);
+        if (gallery.downloadStatusIndex == DownloadStatus.downloaded.index) {
+          final GalleryDownloadInfo restoredInfo = galleryDownloadInfos[gallery.gid]!;
+          /// If marked downloaded but the cover file is missing, files are
+          /// gone — reset to paused so the user can re-download.
+          bool filesMissing = false;
+          if (restoredInfo.coverImage?.path != null) {
+            final String coverAbs =
+                DownloadPathResolver.computeImageDownloadAbsolutePathFromRelativePath(restoredInfo.coverImage!.path!);
+            filesMissing = !await io.File(coverAbs).exists();
+          }
+          if (filesMissing) {
+            log.warning('verifyMetadata: files missing for restored gallery $gidFromName, resetting to paused');
+            await _updateGalleryInDatabase(
+              GalleryDownloadedCompanion(gid: Value(gallery.gid), downloadStatusIndex: Value(DownloadStatus.paused.index)),
+            );
+            restoredInfo.downloadProgress.downloadStatus = DownloadStatus.paused;
+            restoredInfo.downloadProgress.curCount = 0;
+            await GalleryImageDao.updateImageStatusByGallery(gallery.gid, DownloadStatus.downloaded.index, DownloadStatus.none.index);
+            for (GalleryImage? img in restoredInfo.images ?? <GalleryImage?>[]) {
+              if (img?.downloadStatus == DownloadStatus.downloaded) {
+                img?.downloadStatus = DownloadStatus.none;
+              }
+            }
+            update(['$galleryDownloadProgressId::${gallery.gid}', '$downloadImageId::${gallery.gid}']);
+          } else {
+            restoredInfo.evictImages();
+          }
+        }
+        repairedCount++;
+        log.info('verifyMetadata: restored gallery $gidFromName: ${gallery.title}');
+      } catch (e, st) {
+        log.error('verifyMetadata: error restoring gallery $gidFromName: ${dir.path}', e, st);
+      }
+      await Future.delayed(Duration.zero);
+    }
+
+    if (repairedCount > 0) {
+      update([galleryCountChangedId]);
+      log.info('verifyMetadata: repaired $repairedCount galleries');
+    }
+
+    return repairedCount;
   }
 
   Future<int> restoreTasks() async {
@@ -1852,7 +2122,7 @@ class GalleryDownloadInfo implements Comparable<GalleryDownloadInfo> {
   /// been deleted locally — any URL in the chain that still exists locally is
   /// enough to link two galleries into the same version group.
   String? oldVersionGalleryUrl;
-  final String? sanitizedTitle;
+  String? sanitizedTitle;
 
   /// Parse [oldVersionGalleryUrl] into an ordered ancestor chain.
   /// Returns `[]` when null, `[url]` for legacy single-URL records, and the
