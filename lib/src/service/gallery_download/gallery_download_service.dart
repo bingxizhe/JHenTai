@@ -1005,6 +1005,12 @@ class GalleryDownloadService extends GetxController with GridBasePageServiceMixi
   /// galleries whose metadata exists on disk but were skipped or failed
   /// during the initial restore (e.g. a transient parse error), and to
   /// log sanitizedTitle mismatches that would cause wrong path lookups.
+  /// Coalesces concurrent [verifyDownloadedGalleriesMetadata] calls so
+  /// multiple [ensureRestored] invocations (e.g. from repeated
+  /// [DownloadPage.initState]) don't run the scan in parallel and
+  /// oscillate sanitizedTitle between duplicate directories.
+  Future<int>? _verifyFuture;
+
   Future<void> ensureRestored() async {
     log.info('ensureRestored: called');
     await restoreTasks();
@@ -1029,6 +1035,22 @@ class GalleryDownloadService extends GetxController with GridBasePageServiceMixi
   /// consistent: it only stats files and compares strings, re-reading
   /// metadata only for galleries that are missing from memory.
   Future<int> verifyDownloadedGalleriesMetadata() async {
+    /// Coalesce concurrent calls — multiple ensureRestored() invocations
+    /// (e.g. from repeated DownloadPage.initState) would otherwise run
+    /// the scan in parallel and oscillate sanitizedTitle between
+    /// duplicate directories on disk.
+    if (_verifyFuture != null) {
+      return _verifyFuture!;
+    }
+    _verifyFuture = _doVerifyDownloadedGalleriesMetadata();
+    try {
+      return await _verifyFuture!;
+    } finally {
+      _verifyFuture = null;
+    }
+  }
+
+  Future<int> _doVerifyDownloadedGalleriesMetadata() async {
     await completed;
 
     final String downloadPath = downloadSetting.downloadPath.value;
@@ -1047,24 +1069,44 @@ class GalleryDownloadService extends GetxController with GridBasePageServiceMixi
       }
     }
 
-    for (int i = 0; i < galleryDirs.length; i++) {
-      final io.Directory dir = galleryDirs[i];
-
-      /// Use async exists() — existsSync() in a loop of hundreds of
-      /// directories blocks the UI thread and freezes the app.
+    /// Group directories by gid and select the best one for each gid.
+    /// When duplicate directories exist (e.g. truncated-title dir from an
+    /// older sanitisation algorithm + full-title dir from the current one),
+    /// processing both causes oscillation: the first dir switches
+    /// sanitizedTitle and may reset the gallery to paused; the second dir
+    /// switches it back but can't restore the downloaded status.  By picking
+    /// only the directory with the most files per gid, we avoid this.
+    final Map<int, io.Directory> bestDirByGid = <int, io.Directory>{};
+    final Map<int, int> fileCountByGid = <int, int>{};
+    for (final io.Directory dir in galleryDirs) {
       final io.File metadataFile =
           io.File(path.join(dir.path, _GalleryMetadataStore.metadataFileName));
       if (!await metadataFile.exists()) {
-        if (i % 20 == 0) {
-          await Future.delayed(Duration.zero);
+        continue;
+      }
+      final int? gid = _tryExtractGidFromDirName(dir.path);
+      if (gid == null) {
+        continue;
+      }
+      int fileCount = 0;
+      try {
+        await for (final _ in dir.list()) {
+          fileCount++;
         }
-        continue;
+      } catch (_) {}
+      final int? prevCount = fileCountByGid[gid];
+      if (prevCount == null || fileCount > prevCount) {
+        bestDirByGid[gid] = dir;
+        fileCountByGid[gid] = fileCount;
       }
+    }
 
-      final int? gidFromName = _tryExtractGidFromDirName(dir.path);
-      if (gidFromName == null) {
-        continue;
-      }
+    final List<io.Directory> dirsToProcess = bestDirByGid.values.toList();
+    final List<int> gidsToProcess = bestDirByGid.keys.toList();
+
+    for (int i = 0; i < dirsToProcess.length; i++) {
+      final io.Directory dir = dirsToProcess[i];
+      final int gidFromName = gidsToProcess[i];
 
       final GalleryDownloadInfo? info = galleryDownloadInfos[gidFromName];
 
@@ -1074,6 +1116,33 @@ class GalleryDownloadService extends GetxController with GridBasePageServiceMixi
             DownloadPathResolver.computeGalleryDownloadAbsolutePath(info.toGalleryDownloadedData());
         final bool titleMismatch = !path.equals(expectedPath, dir.path);
 
+        /// When there's a title mismatch, the disk may contain **two**
+        /// directories for the same gid (e.g. a truncated-title dir from an
+        /// older sanitisation algorithm and a full-title dir from the
+        /// current one).  Before switching sanitizedTitle to this
+        /// directory's name, check whether the **current** expected path
+        /// already exists and has a valid cover file.  If it does, this
+        /// directory is a stale duplicate and we skip the mismatch repair
+        /// — otherwise we'd oscillate sanitizedTitle between the two
+        /// directories across runs, and if the stale duplicate is processed
+        /// last the gallery gets reset to paused because its cover file
+        /// doesn't exist.  We still fall through to the restore check
+        /// below so a previously-reset gallery can be recovered.
+        bool skipMismatchRepair = false;
+        if (titleMismatch) {
+          final bool currentPathValid =
+              await io.Directory(expectedPath).exists() &&
+              info.coverImage?.path != null &&
+              await io.File(
+                DownloadPathResolver.computeImageDownloadAbsolutePathFromRelativePath(info.coverImage!.path!),
+              ).exists();
+          if (currentPathValid) {
+            log.info('verifyMetadata: skipping stale duplicate directory for gallery $gidFromName: ${dir.path}');
+            skipMismatchRepair = true;
+          }
+        }
+
+        if (!skipMismatchRepair) {
         /// Detect stale image paths independently: sanitizedTitle may have
         /// been repaired in a prior run while image paths were not, so the
         /// gallery directory now matches but cover/thumbnail files still point
@@ -1144,8 +1213,43 @@ class GalleryDownloadService extends GetxController with GridBasePageServiceMixi
               update(['$galleryDownloadProgressId::${info.gid}', '$downloadImageId::${info.gid}']);
             }
           }
+
+
           repairedCount++;
         }
+        } // end if (!skipMismatchRepair)
+
+        /// Reverse check: if the gallery is paused with curCount=0 (the
+        /// signature of a previous verify reset, not a user pause), and the
+        /// cover file exists at the current path, restore to downloaded.
+        /// This recovers galleries that were incorrectly reset by a prior
+        /// verify run before the duplicate-directory grouping fix.  Runs
+        /// outside the mismatch block so it also fires when sanitizedTitle
+        /// and paths are already correct (the previous run fixed the path
+        /// but left the status as paused).
+        if (info.downloadProgress.downloadStatus == DownloadStatus.paused &&
+            info.downloadProgress.curCount == 0 &&
+            info.coverImage?.path != null) {
+          final String coverAbs =
+              DownloadPathResolver.computeImageDownloadAbsolutePathFromRelativePath(info.coverImage!.path!);
+          if (await io.File(coverAbs).exists()) {
+            log.info('verifyMetadata: restoring gallery $gidFromName to downloaded (was paused with curCount=0, cover exists)');
+            await _updateGalleryInDatabase(
+              GalleryDownloadedCompanion(gid: Value(info.gid), downloadStatusIndex: Value(DownloadStatus.downloaded.index)),
+            );
+            info.downloadProgress.downloadStatus = DownloadStatus.downloaded;
+            info.downloadProgress.curCount = info.pageCount;
+            await GalleryImageDao.updateImageStatusByGallery(info.gid, DownloadStatus.none.index, DownloadStatus.downloaded.index);
+            for (GalleryImage? img in info.images ?? <GalleryImage?>[]) {
+              if (img?.downloadStatus == DownloadStatus.none) {
+                img?.downloadStatus = DownloadStatus.downloaded;
+              }
+            }
+            update(['$galleryDownloadProgressId::${info.gid}', '$downloadImageId::${info.gid}']);
+            repairedCount++;
+          }
+        }
+
         if (i % 20 == 0) {
           await Future.delayed(Duration.zero);
         }
