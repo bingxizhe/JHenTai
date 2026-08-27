@@ -2082,6 +2082,21 @@ class GalleryDownloadService extends GetxController with GridBasePageServiceMixi
   void _clearDownloadedImageInDisk(GalleryDownloadInfo gallery) {
     io.Directory directory = io.Directory(DownloadPathResolver.computeGalleryDownloadAbsolutePath(gallery.toGalleryDownloadedData()));
     if (!directory.existsSync()) {
+      /// sanitizedTitle may not match the on-disk directory name (e.g. after
+      /// a sanitisation algorithm change).  Fall back to matching by gid
+      /// prefix so the directory is still deleted instead of becoming an
+      /// orphan that verify would later re-import.
+      final String downloadPath = downloadSetting.downloadPath.value;
+      try {
+        for (final io.FileSystemEntity entity in io.Directory(downloadPath).listSync()) {
+          if (entity is io.Directory && path.basename(entity.path).startsWith('${gallery.gid} - ')) {
+            entity.deleteSync(recursive: true);
+            return;
+          }
+        }
+      } catch (e) {
+        log.error('Delete image in disk fallback error', e);
+      }
       return;
     }
     directory.deleteSync(recursive: true);
