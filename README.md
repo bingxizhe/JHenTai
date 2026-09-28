@@ -66,7 +66,7 @@ Upstream only stores a single-hop parent version URL. This fork extends it to a 
 
 ## Download & Install
 
-Refer to the [original project's releases](https://github.com/jiangtian616/JHenTai/releases) for stable builds.
+Download the latest release (Android APK & Windows ZIP) from [GitHub Releases](https://github.com/bingxizhe/JHenTai/releases).
 
 To build from source:
 

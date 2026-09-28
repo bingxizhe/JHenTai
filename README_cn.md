@@ -66,7 +66,7 @@
 
 ## 下载与安装
 
-稳定版请参考 [原项目 Releases](https://github.com/jiangtian616/JHenTai/releases)。
+从 [GitHub Releases](https://github.com/bingxizhe/JHenTai/releases) 下载最新版本（Android APK 和 Windows ZIP）。
 
 从源码构建：
 

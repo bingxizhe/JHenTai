@@ -66,7 +66,7 @@
 
 ## 다운로드 및 설치
 
-안정 버전은 [원본 프로젝트 Releases](https://github.com/jiangtian616/JHenTai/releases)를 참조하세요.
+최신 릴리스(Android APK 및 Windows ZIP)는 [GitHub Releases](https://github.com/bingxizhe/JHenTai/releases)에서 다운로드하세요.
 
 소스에서 빌드:
 
