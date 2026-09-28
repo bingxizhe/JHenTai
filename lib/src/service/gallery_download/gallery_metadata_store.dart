@@ -113,7 +113,7 @@ class _GalleryMetadataStore {
     }
   }
 
-  /// Parsed metadata for a single gallery's restore. The store has applied
+   /// Parsed metadata for a single gallery's restore. The store has applied
   /// all compatibility back-fills (missing fields, sanitizedTitle, recomputed
   /// image paths after download-location change, and the downloaded-status
   /// sanity check).
@@ -135,14 +135,12 @@ class _GalleryMetadataStore {
     if (raw == null) {
       return null;
     }
-    return _buildRestoredRecord(raw, downloadPath, visibleDirPath, path.basename(galleryDir.path));
+    return _buildRestoredRecord(raw, downloadPath, visibleDirPath, galleryDir.path);
   }
 
   /// Read + parse the metadata file in [galleryDir]. Returns null if the file
   /// is missing or unparseable. Compatibility back-fills (for fields added in
   /// later versions) are applied to the gallery map before returning.
-  ///
-  /// Static so it can run in a background isolate (see [readForRestore]).
   static Map<String, dynamic>? read(io.Directory galleryDir) {
     io.File metadataFile = io.File(path.join(galleryDir.path, metadataFileName));
     if (!metadataFile.existsSync()) {
@@ -192,8 +190,9 @@ class _GalleryMetadataStore {
     if (raw == null) {
       return null;
     }
-    return _buildRestoredRecord(raw, downloadPath, visibleDirPath, path.basename(galleryDir.path));
+    return _buildRestoredRecord(raw, downloadPath, visibleDirPath, galleryDir.path);
   }
+
 
   /// Async variant of [read] — uses [File.exists] / [File.readAsString] so the
   /// event loop stays free to process UI rebuilds between file reads.
@@ -238,30 +237,30 @@ class _GalleryMetadataStore {
   /// Shared record-building logic for sync [readForRestore] and
   /// [readForRestoreAsync]. Takes the already-parsed [raw] map and applies
   /// compatibility back-fills.
+  ///
+  /// [galleryDirectoryPath] is the on-disk directory whose `metadata` file was
+  /// read — it is the strongest source of truth for [GalleryDownloadedData.sanitizedTitle]
+  /// (see [DownloadPathResolver.resolveSanitizedGalleryTitleForRestore]).
   static ({GalleryDownloadedData gallery, List<GalleryImage?> images})? _buildRestoredRecord(
     Map<String, dynamic> raw,
     String downloadPath,
     String visibleDirPath,
-    String? diskDirName,
+    String galleryDirectoryPath,
   ) {
     GalleryDownloadedData gallery = GalleryDownloadedData.fromJson(raw['gallery']);
 
-    /// The on-disk directory name is the source of truth for sanitizedTitle.
-    /// Legacy metadata (sanitizedTitle == null) was written by the old 85-char
-    /// truncation algorithm and the directory was never renamed, so recomputing
-    /// with the current 200-byte algorithm would yield a different title and
-    /// break every image path. Prefer the disk directory name whenever it
-    /// matches the gallery's gid; only fall back to recomputation when the
-    /// directory name is unavailable.
-    final String? diskSanitizedTitle = _extractDiskSanitizedTitle(diskDirName, gallery.gid);
-    if (diskSanitizedTitle != null &&
-        (gallery.sanitizedTitle == null || gallery.sanitizedTitle != diskSanitizedTitle)) {
-      gallery = gallery.copyWith(sanitizedTitle: Value(diskSanitizedTitle));
-    } else if (gallery.sanitizedTitle == null) {
-      final int reservedBytes = utf8.encode('${gallery.gid} - ').length;
-      gallery = gallery.copyWith(
-        sanitizedTitle: Value(DownloadPathResolver.computeSanitizedGalleryTitle(gallery.title, reservedBytes)),
-      );
+    /// The scanned directory is where the bytes actually live. Old metadata
+    /// has no sanitizedTitle, and metadata produced by an earlier buggy restore
+    /// may contain a title computed with the newer byte-based rule. Reconcile
+    /// both cases to the actual `{gid} - {title}` directory on disk.
+    final String restoredSanitizedTitle = DownloadPathResolver.resolveSanitizedGalleryTitleForRestore(
+      gid: gallery.gid,
+      rawTitle: gallery.title,
+      persistedSanitizedTitle: gallery.sanitizedTitle,
+      galleryDirectoryPath: galleryDirectoryPath,
+    );
+    if (gallery.sanitizedTitle != restoredSanitizedTitle) {
+      gallery = gallery.copyWith(sanitizedTitle: Value(restoredSanitizedTitle));
     }
 
     List<GalleryImage?> images = (jsonDecode(raw['images']) as List).map((_map) => _map == null ? null : GalleryImage.fromJson(_map)).toList();
@@ -290,18 +289,4 @@ class _GalleryMetadataStore {
     return (gallery: gallery, images: images);
   }
 
-  /// Extract the sanitized title portion from an on-disk directory name of the
-  /// form `'{gid} - {sanitizedTitle}'`. Returns null when [diskDirName] is null
-  /// or does not start with the expected `'{gid} - '` prefix, so callers can
-  /// safely fall back to recomputation.
-  static String? _extractDiskSanitizedTitle(String? diskDirName, int gid) {
-    if (diskDirName == null) {
-      return null;
-    }
-    final String prefix = '$gid - ';
-    if (!diskDirName.startsWith(prefix)) {
-      return null;
-    }
-    return diskDirName.substring(prefix.length);
-  }
 }

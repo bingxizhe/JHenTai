@@ -60,8 +60,8 @@ import 'download_path_resolver.dart';
 import 'eh_image_exception_matcher.dart';
 
 part 'gallery_download_task_runner.dart';
-part 'gallery_upgrade_migrator.dart';
 part 'gallery_metadata_store.dart';
+part 'gallery_upgrade_migrator.dart';
 
 /// Responsible for local images meta-data and download all images of a gallery
 GalleryDownloadService galleryDownloadService = GalleryDownloadService();
@@ -117,13 +117,22 @@ class GalleryDownloadService extends GetxController with GridBasePageServiceMixi
   /// Backward-compat alias — external callers read this const to locate the
   /// metadata file. The canonical home is now [_GalleryMetadataStore].
   static const String metadataFileName = _GalleryMetadataStore.metadataFileName;
-  static const int _priorityBase = 100000000;
+  /// One priority level occupies this many scheduler-priority units. Sized so
+  /// the insert-time term below (epoch seconds * 2000, ~3.6e12 in 2026 and
+  /// growing ~2000/sec) plus the per-gallery serialNo slot (max 1999) always
+  /// fits within a single level — otherwise insert time would swamp the
+  /// user-assigned gallery priority and high-priority galleries would download
+  /// in insert-time order instead.
+  static const int _priorityBase = 1000000000000000;
 
   final Completer<bool> _completer = Completer();
 
   Future<bool> get completed => _completer.future;
 
   Worker? _downloadSettingListener;
+
+  @override
+  List<JHLifeCircleBean> get initDependencies => super.initDependencies..add(downloadSetting);
 
   @override
   Future<void> doInitBean() async {
@@ -1455,9 +1464,31 @@ class GalleryDownloadService extends GetxController with GridBasePageServiceMixi
         gallery = gallery.copyWith(downloadStatusIndex: DownloadStatus.paused.index);
       }
 
-      /// skip if exists
-      if (galleryDownloadInfos.containsKey(gallery.gid)) {
-        continue;
+      /// Existing tasks are normally skipped. Versions affected by #823 may
+      /// already have been restored with a sanitizedTitle that points to a
+      /// directory which never existed. If disk metadata now resolves to a
+      /// real directory instead, replace that stale record and restore it again.
+      final GalleryDownloadInfo? existingGallery = galleryDownloadInfos[gallery.gid];
+      if (existingGallery != null) {
+        if (!_shouldRepairRestoredGalleryPath(existingGallery, gallery, images)) {
+          continue;
+        }
+
+        log.info('Repair stale restored gallery path, gid: ${gallery.gid}');
+
+        /// Keep user-managed values that may have changed after the bad restore.
+        /// Only the restored path-related data should be replaced by the disk snapshot.
+        gallery = gallery.copyWith(
+          insertTime: existingGallery.insertTime,
+          priority: existingGallery.priority,
+          sortOrder: existingGallery.sortOrder,
+          groupName: existingGallery.group,
+          tags: existingGallery.tags,
+          tagRefreshTime: Value(existingGallery.tagRefreshTime),
+        );
+
+        await _clearGalleryDownloadInfoInDatabase(gallery.gid);
+        _clearGalleryInfoInMemory(existingGallery);
       }
 
       if (!await _restoreInfoInDatabase(gallery, images)) {
@@ -1478,6 +1509,15 @@ class GalleryDownloadService extends GetxController with GridBasePageServiceMixi
 
       _initGalleryInfoInMemoryWithImages(gallery, restoredImages);
 
+      /// Persist the corrected restored snapshot back to disk only after the
+      /// database restore has succeeded. This upgrades legacy metadata in-place
+      /// with the resolved sanitizedTitle and recomputed image paths, so future
+      /// reinstalls / device transfers no longer need to rediscover the old
+      /// naming compatibility case. A metadata write failure is logged by the
+      /// store and does not roll back an otherwise successful database restore.
+      final GalleryDownloadInfo restoredInfo = galleryDownloadInfos[gallery.gid]!;
+      await _flushMetadataSave(restoredInfo);
+
       /// The metadata-restore path loads every gallery's full image list
       /// (to derive curCount/hasDownloaded and the metadata snapshot). No
       /// consumer retains at startup, so evict completed galleries' lists
@@ -1486,7 +1526,7 @@ class GalleryDownloadService extends GetxController with GridBasePageServiceMixi
       /// (serialNo 0) resident for list/grid cover display; incomplete
       /// galleries keep their list for the download loop.
       if (gallery.downloadStatusIndex == DownloadStatus.downloaded.index) {
-        galleryDownloadInfos[gallery.gid]!.evictImages();
+        restoredInfo.evictImages();
       }
 
       restoredCount++;
@@ -1516,6 +1556,59 @@ class GalleryDownloadService extends GetxController with GridBasePageServiceMixi
       return null;
     }
     return int.tryParse(name.substring(0, sep));
+  }
+
+  /// Return true only for the stale-path shape created by the old restore bug:
+  /// an already-completed DB record points to a missing directory, while
+  /// the metadata being scanned resolves to an existing directory that
+  /// contains at least one of the restored image files.
+  bool _shouldRepairRestoredGalleryPath(
+    GalleryDownloadInfo existingGallery,
+    GalleryDownloadedData restoredGallery,
+    List<GalleryImage?> restoredImages,
+  ) {
+    if (existingGallery.downloadProgress.downloadStatus != DownloadStatus.downloaded) {
+      return false;
+    }
+
+    final String existingPath = path.normalize(
+      DownloadPathResolver.computeGalleryDownloadAbsolutePath(existingGallery.toGalleryDownloadedData()),
+    );
+    final String restoredPath = path.normalize(
+      DownloadPathResolver.computeGalleryDownloadAbsolutePath(restoredGallery),
+    );
+
+    if (existingPath == restoredPath || !io.Directory(restoredPath).existsSync()) {
+      return false;
+    }
+
+    /// A previous bad restore can later create the wrong directory just by
+    /// writing metadata (for example after changing a group or priority).
+    /// Directory existence alone therefore cannot prove the existing record is
+    /// usable. If its cover image is actually readable, however, leave it alone.
+    final String? existingCoverPath = existingGallery.coverImage?.path;
+    if (existingCoverPath != null) {
+      final io.File existingCover = io.File(
+        DownloadPathResolver.computeImageDownloadAbsolutePathFromRelativePath(existingCoverPath),
+      );
+      if (existingCover.existsSync()) {
+        return false;
+      }
+    }
+
+    for (final GalleryImage? image in restoredImages) {
+      final String? imagePath = image?.path;
+      if (imagePath == null) {
+        continue;
+      }
+      final io.File imageFile = io.File(
+        DownloadPathResolver.computeImageDownloadAbsolutePathFromRelativePath(imagePath),
+      );
+      if (imageFile.existsSync()) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /// Re-compute every image's on-disk path after the user changes the download
@@ -1684,7 +1777,9 @@ class GalleryDownloadService extends GetxController with GridBasePageServiceMixi
   ///     2.1.3 if priority is same, download all galleries simultaneously
   ///   2.2 For each gallery, previous image should be downloaded earlier and images with same [serialNo] has the same priority no matter which gallery they belong to
   ///
-  /// Because a gallery has most 2000 images, we assign 2000 numbers to each gallery
+  /// Because a gallery has most 2000 images, we assign 2000 numbers to each
+  /// gallery. The insert-time term below must stay under [_priorityBase] so the
+  /// user-assigned priority always dominates the ordering.
   int _computeGalleryTaskPriority(GalleryDownloadInfo gallery) {
     if (_taskHasBeenPausedOrRemoved(gallery)) {
       return 0;
@@ -2209,8 +2304,7 @@ class GalleryDownloadRequest {
 /// stores the original URL). For regular galleries, always use `url`.
 ///
 /// Free function (not a method on [GalleryImage]) so it can be called from
-/// any context — including the metadata store's [Isolate.run] restore path,
-/// which only has a [GalleryDownloadedData] (parsed from JSON) and no access
+/// any context — only has a [GalleryDownloadedData] (parsed from JSON) and no access
 /// to the [GalleryDownloadInfo] singleton.
 String _downloadUrlFor(GalleryDownloadedData gallery, GalleryImage image) {
   return gallery.downloadOriginalImage ? (image.originalImageUrl ?? image.url) : image.url;
@@ -2295,9 +2389,10 @@ class GalleryDownloadInfo implements Comparable<GalleryDownloadInfo> {
     return jsonEncode(chain);
   }
 
-  /// Pre-parsed `MMddHHmmss` of [insertTime]. Cached at construction so
+  /// Insert-time as epoch seconds, cached at construction so
   /// [_computeGalleryTaskPriority] avoids `DateFormat.parse` on every image
-  /// task submit.
+  /// task submit. Epoch-based (unlike wall-clock `MMddHHmmss`) so the
+  /// within-priority insert-time order stays monotonic across year boundaries.
   late final int _insertTimePriority = _parseInsertTimePriority();
 
   int get insertTimePriority => _insertTimePriority;
@@ -2597,7 +2692,7 @@ class GalleryDownloadInfo implements Comparable<GalleryDownloadInfo> {
   int _parseInsertTimePriority() {
     try {
       final DateTime dt = DateFormat('yyyy-MM-dd HH:mm:ss').parse(insertTime);
-      return int.parse(DateFormat('MMddHHmmss').format(dt));
+      return dt.millisecondsSinceEpoch ~/ 1000;
     } catch (_) {
       return 0;
     }

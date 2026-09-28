@@ -44,6 +44,7 @@ import 'details_page_state.dart';
 
 class DetailsPage extends StatelessWidget with Scroll2TopPageMixin {
   final String tag = newUUID();
+  final bool enableLocalTitleBlocking;
 
   late final DetailsPageLogic logic;
   late final DetailsPageState state;
@@ -54,12 +55,12 @@ class DetailsPage extends StatelessWidget with Scroll2TopPageMixin {
   @override
   Scroll2TopStateMixin get scroll2TopState => state;
 
-  DetailsPage({super.key}) {
+  DetailsPage({super.key}) : enableLocalTitleBlocking = true {
     logic = Get.put(DetailsPageLogic(), tag: tag);
     state = logic.state;
   }
 
-  DetailsPage.preview({super.key});
+  DetailsPage.preview({super.key}) : enableLocalTitleBlocking = false;
 
   @override
   Widget build(BuildContext context) {
@@ -153,7 +154,7 @@ class DetailsPage extends StatelessWidget with Scroll2TopPageMixin {
                         value: 5,
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [Text('block'.tr), const Icon(Icons.block)],
+                          children: [Text('blockThisGallery'.tr), const Icon(Icons.block)],
                         ),
                       ),
                     PopupMenuItem(
@@ -209,7 +210,7 @@ class DetailsPage extends StatelessWidget with Scroll2TopPageMixin {
           physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
           scrollBehavior: UIConfig.scrollBehaviourWithScrollBarWithMouse,
           controller: state.scrollController,
-          scrollCacheExtent: ScrollCacheExtent.pixels(5000),
+          scrollCacheExtent: const ScrollCacheExtent.pixels(250),
           slivers: [
             CupertinoSliverRefreshControl(onRefresh: logic.handleRefresh),
             if (preferenceSetting.showAllGalleryTitles.isTrue) _buildSubTitle(context),
@@ -319,20 +320,7 @@ class DetailsPage extends StatelessWidget with Scroll2TopPageMixin {
               anchors: editableTextState.contextMenuAnchors,
             );
 
-            if (!editableTextState.currentTextEditingValue.selection.isCollapsed) {
-              toolbar.buttonItems?.add(
-                ContextMenuButtonItem(
-                  label: 'search'.tr,
-                  onPressed: () {
-                    ContextMenuController.removeAny();
-                    newSearch(
-                      keyword: editableTextState.currentTextEditingValue.selection.textInside(editableTextState.currentTextEditingValue.text),
-                      forceNewRoute: true,
-                    );
-                  },
-                ),
-              );
-            }
+            _appendTitleContextMenuItems(toolbar, editableTextState);
 
             return toolbar;
           },
@@ -384,20 +372,7 @@ class DetailsPage extends StatelessWidget with Scroll2TopPageMixin {
                     anchors: editableTextState.contextMenuAnchors,
                   );
 
-                  if (!editableTextState.currentTextEditingValue.selection.isCollapsed) {
-                    toolbar.buttonItems?.add(
-                      ContextMenuButtonItem(
-                        label: 'search'.tr,
-                        onPressed: () {
-                          ContextMenuController.removeAny();
-                          newSearch(
-                            keyword: editableTextState.currentTextEditingValue.selection.textInside(editableTextState.currentTextEditingValue.text),
-                            forceNewRoute: true,
-                          );
-                        },
-                      ),
-                    );
-                  }
+                  _appendTitleContextMenuItems(toolbar, editableTextState);
 
                   return toolbar;
                 },
@@ -405,6 +380,42 @@ class DetailsPage extends StatelessWidget with Scroll2TopPageMixin {
             );
           },
         ),
+      ),
+    );
+  }
+
+  void _appendTitleContextMenuItems(
+    AdaptiveTextSelectionToolbar toolbar,
+    EditableTextState editableTextState,
+  ) {
+    TextEditingValue editingValue = editableTextState.currentTextEditingValue;
+    if (editingValue.selection.isCollapsed) {
+      return;
+    }
+
+    String rawSelectedText = editingValue.selection.textInside(editingValue.text);
+    toolbar.buttonItems?.add(
+      ContextMenuButtonItem(
+        label: 'search'.tr,
+        onPressed: () {
+          ContextMenuController.removeAny();
+          newSearch(keyword: rawSelectedText, forceNewRoute: true);
+        },
+      ),
+    );
+
+    String selectedText = rawSelectedText.trim();
+    if (!enableLocalTitleBlocking || selectedText.isEmpty) {
+      return;
+    }
+
+    toolbar.buttonItems?.add(
+      ContextMenuButtonItem(
+        label: 'blockTitleLocally'.tr,
+        onPressed: () {
+          ContextMenuController.removeAny();
+          logic.blockTitle(selectedText);
+        },
       ),
     );
   }
@@ -1373,6 +1384,7 @@ class DetailsPage extends StatelessWidget with Scroll2TopPageMixin {
                                           containerWidth: constraints.maxWidth,
                                           borderRadius: BorderRadius.circular(8),
                                           maxBytes: 128 * 1024,
+                                          disableAnimation: true,
                                         )
                                       : EHThumbnail(
                                           thumbnail: state.galleryDetails!.thumbnails[index],

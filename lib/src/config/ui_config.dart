@@ -521,6 +521,7 @@ class UIConfig {
 
   /// EH Tag
   static Color ehWatchedTagDefaultBackGroundColor = const Color(0xFF3377FF);
+  static Color ehHiddenTagDefaultBackGroundColor = const Color.from(alpha: 1, red: 1, green: 0.4, blue: 0.4);
 
   static Color ehTagBackGroundColor(BuildContext context) => Theme.of(context).colorScheme.secondary.withValues(alpha: 0.15);
 
@@ -553,7 +554,8 @@ class UIConfig {
   static Color groupDialogCheckBoxColor(BuildContext context) => Theme.of(context).colorScheme.primary;
 
   /// Archive dialog
-  static const double archiveDialogBodyHeight = 240;
+  static const double archiveDialogBalanceHeight = 24;
+  static const double archiveDialogBodyHeight = 300;
   static const double archiveDialogCostTextSize = 10;
   static const double archiveDialogDownloadTextSize = 14;
   static const double archiveDialogDownloadIconSize = 16;

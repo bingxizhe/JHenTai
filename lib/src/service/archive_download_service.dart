@@ -16,6 +16,7 @@ import 'package:j_downloader/j_downloader.dart';
 import 'package:jhentai/src/database/dao/archive_group_dao.dart';
 import 'package:jhentai/src/database/database.dart';
 import 'package:jhentai/src/exception/eh_site_exception.dart';
+import 'package:jhentai/src/extension/dio_exception_extension.dart';
 import 'package:jhentai/src/model/archive_bot_response/archive_bot_response.dart';
 import 'package:jhentai/src/model/archive_bot_response/archive_resolve_vo.dart';
 import 'package:jhentai/src/model/archive_unlock_result.dart';
@@ -42,6 +43,7 @@ import '../pages/download/grid/mixin/grid_download_page_service_mixin.dart';
 import '../utils/archive_util.dart';
 import '../utils/file_util.dart';
 import '../utils/snack_util.dart';
+import 'gallery_download/download_path_resolver.dart';
 import 'gallery_download/gallery_download_service.dart';
 import 'jh_service.dart';
 import 'log.dart';
@@ -73,6 +75,9 @@ class ArchiveDownloadService extends GetxController
   late Worker isolateCountListener;
   late Worker proxyConfigListener;
   late Worker timeoutListener;
+
+  @override
+  List<JHLifeCircleBean> get initDependencies => super.initDependencies..addAll([downloadSetting, networkSetting]);
 
   @override
   Future<void> doInitBean() async {
@@ -464,22 +469,43 @@ class ArchiveDownloadService extends GetxController
       ArchiveDownloadedData archive =
           ArchiveDownloadedData.fromJson(metadata as Map<String, dynamic>);
 
-      /// skip if exists
-      if (archiveDownloadInfos.containsKey(archive.gid)) {
+      archive = archive.copyWith(archiveStatusCode: ArchiveStatus.completed.code);
+
+      /// The scanned unpacking directory is where the unpacked image bytes
+      /// actually live. Metadata written before sanitizedTitle has no such field,
+      /// and restoring one of those files with the newer byte-based rule (issue
+      /// #823) can store a title that points at a directory which never existed.
+      /// Reconcile the title to the real on-disk directory in both cases.
+      final String restoredSanitizedTitle = DownloadPathResolver.resolveArchiveSanitizedTitleForRestore(
+        gid: archive.gid,
+        rawTitle: archive.title,
+        persistedSanitizedTitle: archive.sanitizedTitle,
+        archiveDirectoryPath: galleryDir.path,
+      );
+
+      final ArchiveDownloadInfo? existingInfo = archiveDownloadInfos[archive.gid];
+      if (existingInfo != null) {
+        /// A stale record restored once under the bug keeps a sanitizedTitle that
+        /// points at a missing directory. If the scanned metadata now resolves to
+        /// a real unpacking directory, patch that record in place instead of
+        /// skipping it. Archive images are never persisted — readers list the
+        /// unpacking directory live — so only the stored title must change and no
+        /// disk data is ever touched.
+        if (!_shouldRepairRestoredArchivePath(existingInfo, archive, restoredSanitizedTitle)) {
+          continue;
+        }
+
+        log.info('Repair stale restored archive path, gid: ${archive.gid}');
+
+        await _repairRestoredArchiveInfo(archive.gid, restoredSanitizedTitle);
+        restoredCount++;
         continue;
       }
 
-      archive =
-          archive.copyWith(archiveStatusCode: ArchiveStatus.completed.code);
-
-      /// Back-fill sanitizedTitle for metadata files written before this field was introduced.
-      if (archive.sanitizedTitle == null) {
-        final int reservedBytes =
-            utf8.encode('Archive - ${archive.gid} - ').length;
-        archive = archive.copyWith(
-            sanitizedTitle: Value(
-                _computeSanitizedArchiveTitle(archive.title, reservedBytes)));
-      }
+      archive = archive.copyWith(
+        archiveStatusCode: ArchiveStatus.completed.code,
+        sanitizedTitle: Value(restoredSanitizedTitle),
+      );
 
       if (!await _saveArchiveAndGroupInDatabase(archive)) {
         log.error('Restore archive failed: $archive');
@@ -488,6 +514,16 @@ class ArchiveDownloadService extends GetxController
       }
 
       _initArchiveInMemory(archive, sort: false);
+
+      /// Persist the corrected snapshot back to the real unpacking directory's
+      /// metadata file so future installs / transfers no longer need to re-apply
+      /// the legacy naming compatibility. A metadata write failure is logged and
+      /// does not roll back the successful restore.
+      try {
+        await _saveArchiveInfoInDisk(archive);
+      } catch (e, st) {
+        log.error('Save restored archive metadata failed, gid: ${archive.gid}', e, st);
+      }
 
       restoredCount++;
     }
@@ -499,8 +535,77 @@ class ArchiveDownloadService extends GetxController
     return restoredCount;
   }
 
-  Future<List<GalleryImage>> getUnpackedImages(int gid,
-      {bool computeHash = false}) async {
+  /// Return true only for the stale-path shape created by the old restore bug:
+  /// an already-completed record points at an unpacking directory that holds no
+  /// image bytes, while the metadata being scanned resolves to an existing
+  /// directory that does contain at least one image file.
+  bool _shouldRepairRestoredArchivePath(
+    ArchiveDownloadInfo existingInfo,
+    ArchiveDownloadedData restoredArchive,
+    String restoredSanitizedTitle,
+  ) {
+    if (existingInfo.archiveStatus != ArchiveStatus.completed) {
+      return false;
+    }
+
+    final ArchiveDownloadedData? existingData = archives.firstWhereOrNull((a) => a.gid == restoredArchive.gid);
+    if (existingData == null) {
+      return false;
+    }
+
+    final String existingPath = normalize(computeArchiveUnpackingPath(existingData));
+    final String restoredPath = normalize(computeArchiveUnpackingPath(restoredArchive.copyWith(sanitizedTitle: Value(restoredSanitizedTitle))));
+
+    if (existingPath == restoredPath || !_unpackingDirectoryHasImage(restoredPath)) {
+      return false;
+    }
+
+    /// A previous bad restore can later materialize the wrong directory just by
+    /// writing metadata. Existing image bytes therefore take precedence when
+    /// they are actually readable; only an existing directory without any image
+    /// inside is treated as stale.
+    return !_unpackingDirectoryHasImage(existingPath);
+  }
+
+  bool _unpackingDirectoryHasImage(String directoryPath) {
+    final Directory directory = Directory(directoryPath);
+    if (!directory.existsSync()) {
+      return false;
+    }
+    return directory.listSync().whereType<File>().any((file) => FileUtil.isImageExtension(file.path));
+  }
+
+  /// Patch a stale archive's stored title in database, memory and its metadata
+  /// file, keeping the existing record's own data intact (group, sort order,
+  /// tags, ...). Only the title changes and no unpacked image bytes on disk are
+  /// ever deleted.
+  Future<void> _repairRestoredArchiveInfo(int gid, String restoredSanitizedTitle) async {
+    final ArchiveDownloadedData? existingData = archives.firstWhereOrNull((a) => a.gid == gid);
+    if (existingData == null) {
+      return;
+    }
+
+    final ArchiveDownloadedData repaired = existingData.copyWith(sanitizedTitle: Value(restoredSanitizedTitle));
+    final int index = archives.indexWhere((a) => a.gid == gid);
+    if (index >= 0) {
+      archives[index] = repaired;
+    }
+
+    await ArchiveDao.updateArchive(
+      ArchiveDownloadedCompanion(
+        gid: Value(gid),
+        sanitizedTitle: Value(restoredSanitizedTitle),
+      ),
+    );
+
+    try {
+      await _saveArchiveInfoInDisk(repaired);
+    } catch (e, st) {
+      log.error('Save repaired archive metadata failed, gid: $gid', e, st);
+    }
+  }
+
+  Future<List<GalleryImage>> getUnpackedImages(int gid, {bool computeHash = false}) async {
     ArchiveDownloadedData archive = archives.firstWhere((a) => a.gid == gid);
     Directory directory = Directory(computeArchiveUnpackingPath(archive));
 
@@ -990,10 +1095,8 @@ class ArchiveDownloadService extends GetxController
             cancelToken: archiveDownloadInfo.cancelToken,
             parser: EHSpiderParser.downloadArchivePage2DownloadUrl,
           ),
-          retryIf: (e) =>
-              e is DioException && e.type != DioExceptionType.cancel,
-          onRetry: (e) => log.download(
-              'Parse archive download url: ${archive.title} failed, retry. Reason: ${(e as DioException).message}'),
+          retryIf: (e) => e is DioException && e.type != DioExceptionType.cancel,
+          onRetry: (e) => log.download('Parse archive download url: ${archive.title} failed, retry. Reason: ${(e as DioException).errorMsg}'),
           maxAttempts: _maxRetryTimes,
         );
       } on DioException catch (e) {
@@ -1069,6 +1172,17 @@ class ArchiveDownloadService extends GetxController
     queryParameters.putIfAbsent('start', () => '1');
     Uri replacedUri = uri.replace(queryParameters: queryParameters);
     downloadPath = replacedUri.toString();
+
+    /// the bot protocol only returns the original archive url; the resample variant lives at the same path with trailing '/2' replaced by '/3'
+    if (archiveDownloadInfo.parseSource != ArchiveParseSource.official.code && !archive.isOriginal) {
+      List<String> segments = List.of(replacedUri.pathSegments);
+      if (segments.isNotEmpty && segments.last == '2') {
+        segments[segments.length - 1] = '3';
+        downloadPath = replacedUri.replace(pathSegments: segments).toString();
+      } else {
+        log.warning('Bot returned archive url without trailing /2 segment, fallback to original: $downloadPath');
+      }
+    }
 
     if (archiveDownloadInfo.parseSource == ArchiveParseSource.official.code) {
       archiveDownloadInfo.downloadUrl = 'https://' +

@@ -246,6 +246,7 @@ class _GalleryDownloadTaskRunner {
       }
 
       GalleryDownloadInfo galleryDownloadInfo = _service.galleryDownloadInfos[gallery.gid]!;
+
       /// Image may be cleared between the sync read and the async fallback by
       /// a concurrent `_reParseImageUrlAndDownload` (403 re-parse on the same
       /// serialNo calls `clearImage`). The `!` would NPE in that window.
@@ -339,7 +340,7 @@ class _GalleryDownloadTaskRunner {
     };
   }
 
-  /// the image's url may be invalid, try re-parse and then download
+  /// the image's url may be invalid, try re-parse and then download, eg. reparse token
   Future<void> _reParseImageUrlAndDownload(int serialNo) async {
     if (_service._taskHasBeenPausedOrRemoved(gallery)) {
       return;
