@@ -9,41 +9,60 @@ English | [简体中文](README_cn.md) | [한국어](README_kr.md)
 
 This is a fork of [JHenTai](https://github.com/jiangtian616/JHenTai), a manga app for E-Hentai, supporting Android & iOS & Windows & MacOS & Linux.
 
-This fork adds several features and optimizations on top of the original project. All changes are designed to be non-invasive and compatible with the upstream codebase.
+The fork focuses on **strengthening download management**, **local gallery management**, and **batch operations**. All changes are designed to be non-invasive and compatible with the upstream codebase, and are regularly merged with upstream.
 
-## Fork Features & Optimizations
+## Fork Features
 
-### 1. Startup Performance Optimization
+### 1. Gallery Version Chain Management
 
-- **Deferred gallery scanning**: Local gallery scanning no longer blocks app startup. Scanning logic runs after UI rendering is complete via `doAfterBeanReady()` instead of `doInitBean()`.
-- **Lazy database queries**: Large dataset queries (e.g., image records) are delayed until UI initialization completes, reducing initial database query time from ~3.9s to ~82ms.
-- **Restore race condition fix**: `restoreTasks()` now uses an `isRestoring` guard with `try-finally` to prevent concurrent restore operations when entering the download page and manually triggering restore from settings simultaneously.
+Upstream only stores a single-hop parent version URL. This fork extends it to a complete ancestor chain, enabling cross-multi-hop version recognition even when intermediate versions are deleted.
 
-### 2. History Version Batch Delete
+- **Complete ancestor chain**: `oldVersionGalleryUrl` is stored as a JSON array of the full ancestor chain (parent → grandparent → …, up to 20 levels). Downloading a new gallery automatically crawls and persists the chain in the background, with short-circuit optimization when an ancestor already exists locally.
+- **Batch delete historical versions** (`eh_delete_history_versions_dialog.dart`): Groups downloaded galleries by ancestor chain and pre-selects all but the latest version in each group for one-click batch deletion. Supports "deep scan" to discover version relationships not recorded locally, with 24-hour result caching and dual-site (e-hentai/exhentai) fallback.
+- **Fetch historical version links** (`eh_fetch_old_version_urls_dialog.dart`): Recursively crawls the complete ancestor chain for all downloaded galleries online, with dual-site fallback. Automatically upgrades old single-link records to the full chain format.
+- **Domain-agnostic matching**: Version relationships are matched by gid+token regardless of domain, handling e-hentai.org vs exhentai.org URL mixing.
 
-- **Version grouping via Union-Find**: Galleries are grouped by version chain using `oldVersionGalleryUrl` field (not by name), avoiding misjudgment when multiple galleries share the same name.
-- **Deep scan with dual-site fallback**: When scanning gallery versions, the system first tries the original site (e-hentai.org/exhentai.org) with up to 5 retries. On failure, it falls back to the opposite site with another 5 retries, improving scan success rate for galleries moved between sites.
-- **Scan result persistence**: Deep scan results (including retry results) are saved as an integral whole, with automatic merging of retry data into existing scan history. Results older than 24 hours are automatically discarded.
-- **Global status update**: After deletion, `updateGlobalGalleryStatus()` is called to sync gallery status across all pages.
-- **Pre-selected old versions**: All old versions are pre-selected by default, allowing users to delete them without manually expanding any group.
+### 2. Download Restore Robustness
+
+- **Deferred restore**: Download restore no longer runs at app startup. It is triggered on first entry to the download page via `ensureRestored()`, preventing large directories (thousands of galleries) from blocking app launch.
+- **Restore progress banner**: The download page shows phased progress ("Parsing gallery data x/y", "Loading galleries x/y").
+- **Batch restore mode**: Suppresses per-gallery `update()` calls during restore of 3000+ galleries, refreshing UI at intervals instead of per-item.
+- **Async I/O restore**: Restore uses async file I/O instead of synchronous `listSync`/`readAsStringSync`, avoiding UI thread blocking.
+- **Skip already-loaded galleries**: Extracts gid from directory names to skip metadata parsing for galleries already loaded from DB.
+- **Metadata consistency verification** (`verifyDownloadedGalleriesMetadata`): Scans download directories to repair sanitizedTitle mismatches, stale image paths, and duplicate-directory oscillation. Also recovers galleries incorrectly reset to `paused` by prior verify errors (curCount=0 but cover file exists).
+- **Orphan directory cleanup**: When deleting a gallery, if sanitizedTitle doesn't match the disk directory name, falls back to gid-prefix matching to delete the directory, preventing orphan directories from being re-imported by verify.
 
 ### 3. Favorite Batch Download
 
-- **One-click batch download**: Download all favorites from a specific group with a single action, with support for breakpoint resume.
-- **Incremental persistence**: Favorites are saved every 5 pages instead of every page, reducing O(n²) serialization overhead for large collections.
-- **Rate limiting at network layer**: No artificial delay between enqueue operations. Rate limiting is handled by the download engine (`EHExecutor`) at the actual network request dispatch level via `Rate(maximum, period)`.
-- **Retry mechanism**: Failed download tasks are retried up to 5 times with configurable retry intervals.
+- **One-click batch download**: Download all favorites from a specific group with a single action. Automatically skips galleries already downloaded (normal or archive).
+- **Breakpoint resume**: Supports 30-minute breakpoint resume. On load/download failure, progress is persisted and a countdown banner with "resume" button is shown.
+- **Pre-download dialog**: Choose target download group and whether to download original images before batch download starts.
+- **Progress banner**: Shows "Loading all favorites x" and "Batch downloading x/y" progress.
+- **Retry mechanism**: 5 retries for both page loading (2s interval) and per-gallery enqueue (500ms interval).
+- **Incremental persistence**: Favorites saved every 5 pages instead of every page, reducing O(n²) serialization overhead.
 
-### 4. WebP/GIF Animation Playback Optimization
+### 4. Local Gallery Management
 
-- **Visibility-based animation control**: Animated WebP/GIF images only play when visible in the viewport. Off-screen images render only the first frame, reducing decode cost and memory pressure.
-- **Simplified animation fields**: Consolidated from 3 animation control fields (`disableGifAnimation`, `playAnimation`, `forcePlay`) to 2 (`disableGifAnimation`, `playAnimation`), relying solely on `VisibilityDetector` for visibility tracking.
-- **Single-frame decoding for off-screen images**: Off-screen local images use `_SingleFrameExtendedFileImageProvider` and off-screen online images use `_SingleFrameExtendedNetworkImageProvider` to limit decoding to the first frame only.
+- **Deferred scanning**: Local gallery scanning no longer blocks app startup. Triggered on first entry to the download page via `ensureScanned()`.
+- **Scan progress display**: Shows "scanned directories / total" and "discovered galleries" count during scanning.
+- **Loading state indicator**: Local gallery pages use `LoadingStateIndicator` to show scan loading state and progress text.
+- **Full directory deletion**: Deleting a local gallery always removes the entire directory (including non-image files and metadata), preventing leftover empty folders or half-deleted states.
+- **Async scan refactor**: Scan logic restructured to async/await with progress callbacks, replacing nested Completer patterns.
 
-### 5. Stability Fixes
+### 5. UI/UX Improvements
 
-- **setState() after dispose() fix**: Added `if (!mounted) return;` guard in `VisibilityDetector` callback to prevent state updates on disposed widgets.
-- **Debug code cleanup**: Replaced `debugPrint` calls with the project's unified `log.trace` system.
+- **Reactive download icons**: Gallery card download icons are now reactive, listening to `GalleryDownloadService` and `ArchiveDownloadService` state changes. Icons update immediately when download/archive completes (previously based on a one-time `downloaded` check that never updated).
+- **Text overflow fixes**: Long text in comment author names, dashboard cards, download list uploader names, and gallery card timestamps now use `Flexible` + `maxLines:1` + `overflow:ellipsis`.
+- **Third-party viewer error handling**: `openThirdPartyViewer` judges errors by non-zero exit code only, avoiding false errors from Chromium/Electron stderr noise (e.g., GPU cache failures).
+
+### 6. Performance & Engineering
+
+- **Startup performance logging**: Records per-bean `initBean` duration; beans exceeding 50ms are logged at trace level, along with total init time.
+- **Database WAL mode**: Enables `PRAGMA journal_mode = WAL` and `busy_timeout = 5000` for improved concurrent read/write performance.
+- **Insert-or-replace for images**: `insertImage` changed to `InsertMode.insertOrReplace`, fixing conflicts from duplicate inserts.
+- **Recent gallery group limit**: Recent gallery group count capped at 10.
+- **Custom insertTime**: `GalleryDownloadRequest` adds an `insertTime` field for batch favorite downloads to stagger times for priority scheduler.
+- **New version URL selection**: `newVersionGalleryUrl` selects the latest child version by updateTime instead of taking the last one.
 
 ## Download & Install
 
