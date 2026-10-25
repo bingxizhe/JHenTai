@@ -4959,7 +4959,7 @@ class ImageData extends DataClass implements Insertable<ImageData> {
   /// Original (full-size) image URL. Null for galleries downloaded without
   /// `downloadOriginalImage`, or for legacy rows written before this column
   /// existed — runtime falls back to `url` via
-  /// `GalleryImageIndex.downloadUrlFor`.
+  /// `_downloadUrlFor` in gallery_download_service.dart.
   final String? originalImageUrl;
   final int serialNo;
   final String path;
