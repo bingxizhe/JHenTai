@@ -45,8 +45,28 @@ class FavoritePageLogic extends BasePageLogic {
   /// max retry attempts after an initial failure (page load & download task)
   static const int _maxRetryTimes = 5;
 
-  /// wait between page loads (matches the normal inter-page delay)
-  static const Duration _pageLoadWait = Duration(seconds: 2);
+  /// Adaptive pacing for favorites list page loads.
+  ///
+  /// EH throttles page loads per IP and escalates to a temporary ban when the
+  /// request pattern looks like automated harvesting, but it publishes no
+  /// threshold. So pace adaptively instead of using a fixed delay:
+  /// - start at [_initialPageInterval] (1 req/s);
+  /// - shrink by [_pageIntervalStep] after every [_successesBeforeSpeedUp]
+  ///   consecutive successful pages, down to [_minPageInterval] — that floor is
+  ///   exactly the 2 req/s ceiling;
+  /// - double the interval on any failure (error / blank body / banned page),
+  ///   up to [_maxPageInterval], and rebuild the success streak before
+  ///   speeding up again.
+  static const Duration _initialPageInterval = Duration(seconds: 1);
+  static const Duration _minPageInterval = Duration(milliseconds: 500);
+  static const Duration _maxPageInterval = Duration(seconds: 8);
+  static const Duration _pageIntervalStep = Duration(milliseconds: 250);
+  static const int _successesBeforeSpeedUp = 2;
+
+  /// current inter-page delay; mutated by [_recordPageLoadSuccess] /
+  /// [_recordPageLoadFailure]
+  Duration _pageInterval = _initialPageInterval;
+  int _successStreak = 0;
 
   /// wait between retry attempts for local enqueue failures
   static const Duration _retryWait = Duration(milliseconds: 500);
@@ -246,6 +266,9 @@ class FavoritePageLogic extends BasePageLogic {
     String? nextGid = savedNextGid;
     int pageCount = 0;
 
+    /// each batch run starts from the conservative interval again
+    _resetPagePacing();
+
     while (true) {
       GalleryPageInfo galleryPage;
       try {
@@ -259,6 +282,8 @@ class FavoritePageLogic extends BasePageLogic {
         );
         return null;
       }
+
+      _recordPageLoadSuccess();
 
       allFavorites.addAll(galleryPage.galleries);
       nextGid = galleryPage.nextGid;
@@ -284,20 +309,61 @@ class FavoritePageLogic extends BasePageLogic {
       if (nextGid == null) {
         break;
       }
-      await Future.delayed(_pageLoadWait);
+      log.debug(
+          '[favorite] page loaded, pageNo: $pageCount, loaded: ${allFavorites.length}, nextGid: $nextGid, next wait: ${_pageInterval.inMilliseconds}ms');
+      await Future.delayed(_pageInterval);
     }
 
+    log.debug('[favorite] all favorites loaded, pages: $pageCount, total: ${allFavorites.length}');
     return allFavorites;
   }
 
-  /// Fetches a favorites page, retrying up to [_maxRetryTimes] times with
-  /// [_pageLoadWait] between attempts (same as the normal inter-page delay).
+  void _resetPagePacing() {
+    _pageInterval = _initialPageInterval;
+    _successStreak = 0;
+    log.debug('[favorite] page pacing reset, interval: ${_pageInterval.inMilliseconds}ms');
+  }
+
+  /// Speed up only after a run of consecutive successes, so a single throttled
+  /// page cannot immediately undo the backoff that followed it.
+  void _recordPageLoadSuccess() {
+    _successStreak++;
+    if (_successStreak < _successesBeforeSpeedUp) {
+      return;
+    }
+    _successStreak = 0;
+
+    final Duration previous = _pageInterval;
+    final Duration next = _pageInterval - _pageIntervalStep;
+    _pageInterval = next < _minPageInterval ? _minPageInterval : next;
+
+    /// stay quiet once the speed-up floor is reached
+    if (_pageInterval != previous) {
+      log.debug(
+          '[favorite] page interval -> ${_pageInterval.inMilliseconds}ms (sped up after $_successesBeforeSpeedUp consecutive successes)');
+    }
+  }
+
+  /// Exponential backoff: any error / blank body / banned page doubles the
+  /// interval (capped at [_maxPageInterval]) and clears the success streak.
+  void _recordPageLoadFailure() {
+    _successStreak = 0;
+
+    final Duration next = _pageInterval * 2;
+    _pageInterval = next > _maxPageInterval ? _maxPageInterval : next;
+    log.debug('[favorite] page interval -> ${_pageInterval.inMilliseconds}ms (backed off after a failed page)');
+  }
+
+  /// Fetches a favorites page, retrying up to [_maxRetryTimes] times with the
+  /// current adaptive interval between attempts.
   Future<GalleryPageInfo> _getGalleryPageWithRetry(String? nextGid) async {
     int attempt = 0;
     while (true) {
       try {
         return await getGalleryPage(nextGid: nextGid);
       } catch (e) {
+        _recordPageLoadFailure();
+
         attempt++;
         if (attempt > _maxRetryTimes) {
           log.error(
@@ -308,7 +374,7 @@ class FavoritePageLogic extends BasePageLogic {
         log.error(
             'load favorites page failed (retry $attempt/$_maxRetryTimes), nextGid: $nextGid',
             e);
-        await Future.delayed(_pageLoadWait);
+        await Future.delayed(_pageInterval);
       }
     }
   }

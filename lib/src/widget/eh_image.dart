@@ -20,6 +20,7 @@ import 'dart:ui' as ui;
 
 import '../service/gallery_download/download_path_resolver.dart';
 import '../service/gallery_download/gallery_download_service.dart';
+import '../service/log.dart';
 
 typedef LoadingProgressWidgetBuilder = Widget Function(double);
 typedef FailedWidgetBuilder = Widget Function(ExtendedImageState state);
@@ -227,6 +228,11 @@ class _EHImageState extends State<EHImage> {
                 ? widget.loadingProgressWidgetBuilder!.call(_computeLoadingProgress(state.loadingProgress, state.extendedImageInfo))
                 : Center(child: UIConfig.loadingAnimation(context));
           case LoadState.failed:
+            /// The image provider swallows the real reason (non-200 status,
+            /// connection error, decode error) and only prints it in debug
+            /// builds, so a broken image gives no clue which host failed.
+            /// Log the URL here to make that diagnosable from the log file.
+            log.warning('Load network image failed, url: $url');
             return widget.failedWidgetBuilder?.call(state) ??
                 Center(
                   child: GestureDetector(child: const Icon(Icons.sentiment_very_dissatisfied), onTap: state.reLoadImage),

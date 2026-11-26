@@ -3,7 +3,6 @@ import 'dart:io';
 
 import 'package:clipboard/clipboard.dart';
 import 'package:dio/dio.dart';
-import 'package:extended_image/extended_image.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -24,6 +23,7 @@ import 'package:jhentai/src/service/path_service.dart';
 import 'package:jhentai/src/setting/download_setting.dart';
 import 'package:jhentai/src/setting/style_setting.dart';
 import 'package:jhentai/src/setting/user_setting.dart';
+import 'package:jhentai/src/utils/image_util.dart';
 import 'package:jhentai/src/utils/permission_util.dart';
 import 'package:jhentai/src/utils/string_uril.dart';
 import 'package:jhentai/src/utils/toast_util.dart';
@@ -446,7 +446,7 @@ abstract class BaseLayoutLogic extends GetxController with GetTickerProviderStat
       return;
     }
 
-    Uint8List? data = await getNetworkImageData(readPageState.images[index]!.url);
+    Uint8List? data = await getNetworkImageDataSafely(readPageState.images[index]!.url);
     if (data == null) {
       return;
     }
@@ -489,7 +489,7 @@ abstract class BaseLayoutLogic extends GetxController with GetTickerProviderStat
       return;
     }
 
-    Uint8List? data = await getNetworkImageData(readPageState.images[index]!.url);
+    Uint8List? data = await getNetworkImageDataSafely(readPageState.images[index]!.url);
     if (data == null) {
       return;
     }
@@ -541,7 +541,7 @@ abstract class BaseLayoutLogic extends GetxController with GetTickerProviderStat
       return;
     }
 
-    Uint8List? data = await getNetworkImageData(readPageState.images[index]!.url);
+    Uint8List? data = await getNetworkImageDataSafely(readPageState.images[index]!.url);
     if (data == null) {
       return;
     }

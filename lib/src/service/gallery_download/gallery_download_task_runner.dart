@@ -26,21 +26,38 @@ class _GalleryDownloadTaskRunner {
       if (gallery.directParentUrl != null && downloadSetting.useJH2UpdateGallery.isTrue) {
         List<String> imageHashes = await fetchImageHashesFromJHenTaiServer();
 
-        if (imageHashes.length == gallery.pageCount) {
+        if (imageHashes.isEmpty) {
+          /// Service unreachable or gallery not indexed yet — fall back to the
+          /// page-scoped reuse, which needs no server support.
+          log.download('Image hashes unavailable, fall back to page reuse, gid: ${gallery.gid}');
+        } else if (imageHashes.length == gallery.pageCount) {
           await _service._upgradeMigrator.copyImageInfosFromImageHashes(gallery, imageHashes);
         } else {
           log.error('Image hashes count mismatch, gid: ${gallery.gid}, expected: ${gallery.pageCount}, actual: ${imageHashes.length}');
         }
       }
 
-      for (int serialNo = 0; serialNo < gallery.pageCount; serialNo++) {
-        processImage(serialNo);
+      /// Parse thumbnails page by page instead of submitting one task per
+      /// image. Each page task also bulk-copies the reusable images of that
+      /// page inside itself, so byte copies consume one rate-limiter slot per
+      /// page rather than one per image. The page chain is continued from
+      /// [parseImageHrefTask] so a wrong `thumbnailsCountPerPage` guess can
+      /// never leave trailing pages unparsed.
+      if (gallery.pageCount > 0) {
+        _service._submitImageTask(gallery, 0, () => parseImageHrefTask(0));
       }
     };
   }
 
   Future<List<String>> fetchImageHashesFromJHenTaiServer() async {
     if (_service._taskHasBeenPausedOrRemoved(gallery)) {
+      return [];
+    }
+
+    /// Skip while the service is known to be unreachable. A DNS outage would
+    /// otherwise cost three retries and two error logs for every gallery.
+    if (!_service._jhImageHashesAvailable) {
+      log.download('Skip fetching image hashes, JHenTai service unavailable');
       return [];
     }
 
@@ -59,7 +76,15 @@ class _GalleryDownloadTaskRunner {
           cancelToken: galleryDownloadInfo.cancelToken,
           parser: JHResponseParser.commonParse,
         ),
-        retryIf: (e) => e is DioException && e.type != DioExceptionType.cancel,
+
+        /// Connection-level failures (DNS / unreachable host) are not worth
+        /// retrying — retrying a failed host lookup just blocks the gallery
+        /// start twice more.
+        retryIf: (e) =>
+            e is DioException &&
+            e.type != DioExceptionType.cancel &&
+            e.type != DioExceptionType.connectionError &&
+            e.type != DioExceptionType.connectionTimeout,
         onRetry: (e) => log.download('Failed to fetch image hashes, retry. Reason: ${(e as DioException).message}'),
         maxAttempts: _maxRetryTimes4FetchImageHashes,
       );
@@ -73,10 +98,15 @@ class _GalleryDownloadTaskRunner {
         return [];
       }
     } on DioException catch (e) {
-      log.error('Failed to fetch image hashes', e.errorMsg, e.stackTrace);
+      if (e.type == DioExceptionType.connectionError || e.type == DioExceptionType.connectionTimeout) {
+        _service._markJhImageHashesUnavailable();
+        log.warning('JHenTai image hash service unreachable, skip it for 10 minutes', e.message);
+      } else {
+        log.warning('Failed to fetch image hashes', e.errorMsg);
+      }
       return [];
     } catch (e) {
-      log.error('Failed to fetch image hashes', e.toString(), StackTrace.current);
+      log.warning('Failed to fetch image hashes', e);
       return [];
     }
   }
@@ -107,7 +137,18 @@ class _GalleryDownloadTaskRunner {
     _service._submitImageTask(gallery, serialNo, () => parseImageHrefTask(serialNo));
   }
 
-  AsyncTask<void> parseImageHrefTask(int serialNo) {
+  /// Parse the thumbnails page that contains [serialNo].
+  ///
+  /// Processing is page-scoped rather than image-scoped: after the page's
+  /// hrefs are filled we (1) bulk-copy every reusable image of the page inside
+  /// this same task, (2) submit the remaining images for URL parsing, and
+  /// (3) chain to the next unparsed page. Chaining — instead of fanning out
+  /// precomputed page indexes — keeps working when the real
+  /// [thumbnailsCountPerPage] differs from the configured default.
+  ///
+  /// [chainNextPage] is false for single-image repair paths, so a one-image
+  /// re-download does not walk every remaining thumbnails page.
+  AsyncTask<void> parseImageHrefTask(int serialNo, {bool chainNextPage = true}) {
     return () async {
       if (_service._taskHasBeenPausedOrRemoved(gallery)) {
         return;
@@ -159,8 +200,24 @@ class _GalleryDownloadTaskRunner {
         return _service._submitImageTask(gallery, serialNo, () => parseImageHrefTask(serialNo));
       }
 
-      /// Next step: parse image url
-      _service._submitImageTask(gallery, serialNo, () => parseImageUrlTask(serialNo));
+      /// Reuse the old version's bytes for this whole page inside this task —
+      /// copies are local file IO and must not each consume a rate-limiter slot.
+      await _service._upgradeMigrator.copyImageInfosFromImageHrefs(gallery, detailPageInfo.imageNoFrom, detailPageInfo.imageNoTo);
+
+      if (_service._taskHasBeenPausedOrRemoved(gallery)) {
+        return;
+      }
+
+      /// Next step for every image of this page that still needs work.
+      for (int i = detailPageInfo.imageNoFrom; i <= detailPageInfo.imageNoTo; i++) {
+        processImage(i);
+      }
+
+      /// Continue with the next page.
+      final int nextSerialNo = detailPageInfo.imageNoTo + 1;
+      if (chainNextPage && nextSerialNo < gallery.pageCount && galleryDownloadInfo.imageHrefs[nextSerialNo] == null) {
+        _service._submitImageTask(gallery, nextSerialNo, () => parseImageHrefTask(nextSerialNo));
+      }
     };
   }
 
@@ -171,15 +228,6 @@ class _GalleryDownloadTaskRunner {
       }
 
       GalleryDownloadInfo galleryDownloadInfo = _service.galleryDownloadInfos[gallery.gid]!;
-
-      /// If this is a update from old gallery, try to copy from existing old image first
-      if (gallery.directParentUrl != null) {
-        await _service._upgradeMigrator.tryCopyImageInfoFromHref(gallery.directParentUrl!, gallery, serialNo);
-
-        if (galleryDownloadInfo.imageAtSync(serialNo) != null) {
-          return;
-        }
-      }
 
       GalleryImage image;
       try {
@@ -259,9 +307,11 @@ class _GalleryDownloadTaskRunner {
 
       await _service._updateImageStatus(gallery, image, serialNo, DownloadStatus.downloading);
 
-      /// If this is a update from old gallery, try to copy from existing old image first
+      /// If this is a update from old gallery, try to copy from existing old image first.
+      /// Only reached when the thumbnails layout carries no `data-orghash`, so
+      /// the page-scoped bulk reuse could not match this image.
       if (gallery.directParentUrl != null) {
-        await _service._upgradeMigrator.tryCopyImageInfoFromImage(gallery.directParentUrl!, gallery, serialNo);
+        await _service._upgradeMigrator.tryCopyImageInfoFromImage(gallery, serialNo);
 
         if (image.downloadStatus == DownloadStatus.downloaded) {
           return;
@@ -358,7 +408,7 @@ class _GalleryDownloadTaskRunner {
     }
 
     /// has not parsed href => parse href
-    return _service._submitImageTask(gallery, serialNo, () => parseImageHrefTask(serialNo));
+    return _service._submitImageTask(gallery, serialNo, () => parseImageHrefTask(serialNo, chainNextPage: false));
   }
 
   Future<void> tryLoadFromCacheInsteadDownload(GalleryImage image, String downloadUrl, int serialNo, String path) async {

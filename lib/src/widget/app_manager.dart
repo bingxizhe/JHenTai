@@ -106,10 +106,23 @@ class _AppManagerState extends State<AppManager> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    /// Log every transition so a silent process exit can be told apart from a
+    /// window close: a closed window reaches [AppLifecycleState.detached],
+    /// while an externally killed process simply stops logging.
+    log.debug('App lifecycle: $state');
     for (DidChangeAppLifecycleStateCallback callback in AppManager._didChangeAppLifecycleStateCallbacks) {
       callback.call(state);
     }
     super.didChangeAppLifecycleState(state);
+  }
+
+  /// Windows delivers a window close as an app exit request instead of a
+  /// lifecycle transition, so a normal close otherwise leaves no trace at all
+  /// in the log. Record it here to distinguish a close from a killed process.
+  @override
+  Future<AppExitResponse> didRequestAppExit() async {
+    log.warning('App exit requested (window close / system shutdown)');
+    return AppExitResponse.exit;
   }
 
   @override

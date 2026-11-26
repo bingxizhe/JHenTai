@@ -23,7 +23,6 @@ import 'package:jhentai/src/enum/config_enum.dart';
 import 'package:jhentai/src/exception/eh_image_exception.dart';
 import 'package:jhentai/src/exception/eh_parse_exception.dart';
 import 'package:jhentai/src/extension/dio_exception_extension.dart';
-import 'package:jhentai/src/extension/list_extension.dart';
 import 'package:jhentai/src/model/gallery_thumbnail.dart';
 import 'package:jhentai/src/model/gallery_url.dart';
 import 'package:jhentai/src/model/jh_response/fetch_image_hashes_vo.dart';
@@ -128,6 +127,21 @@ class GalleryDownloadService extends GetxController with GridBasePageServiceMixi
   final Completer<bool> _completer = Completer();
 
   Future<bool> get completed => _completer.future;
+
+  /// Cooldown deadline after a connection-level failure against the JHenTai
+  /// image-hash service. Without it, every resumed gallery would pay the same
+  /// 3 DNS retries plus 2 error logs while the host is unreachable (seen in
+  /// production logs as `Failed host lookup: 'jhentai.top'` on app start).
+  DateTime? _jhImageHashesUnavailableUntil;
+
+  bool get _jhImageHashesAvailable {
+    final DateTime? until = _jhImageHashesUnavailableUntil;
+    return until == null || DateTime.now().isAfter(until);
+  }
+
+  void _markJhImageHashesUnavailable() {
+    _jhImageHashesUnavailableUntil = DateTime.now().add(const Duration(minutes: 10));
+  }
 
   Worker? _downloadSettingListener;
 
